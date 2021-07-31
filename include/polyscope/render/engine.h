@@ -417,6 +417,9 @@ public:
   virtual void applyTransparencySettings() = 0;
   void addSlicePlane(std::string uniquePostfix);
   void removeSlicePlane(std::string uniquePostfix);
+  bool slicePlanesEnabled(); // true if there is at least one slice plane in the scene
+  virtual void setFrontFaceCCW(bool newVal) = 0; // true if CCW triangles are considered front-facing; false otherwise
+  bool getFrontFaceCCW();
 
   // == Options
   BackgroundView background = BackgroundView::None;
@@ -454,6 +457,11 @@ public:
 
   bool useAltDisplayBuffer = false; // if true, push final render results offscreen to the alt buffer instead
 
+  // Internal windowing and engine details
+  ImFontAtlas* globalFontAtlas = nullptr;
+  ImFont* regularFont = nullptr;
+  ImFont* monoFont = nullptr;
+
 protected:
   // TODO Manage a cache of compiled shaders?
 
@@ -464,12 +472,15 @@ protected:
                           // screenshot renders while minimized.
   float currPixelScale;
   TransparencyMode transparencyMode = TransparencyMode::None;
+  int slicePlaneCount = 0;
+  bool frontFaceCCW = true;
 
   // Cached lazy seettings for the resolve and relight program
   int currLightingSampleLevel = -1;
   TransparencyMode currLightingTransparencyMode = TransparencyMode::None;
 
   // Helpers
+  void configureImGui();
   void loadDefaultMaterials();
   void loadDefaultMaterial(std::string name);
   std::shared_ptr<TextureBuffer> loadMaterialTexture(float* data, int width, int height);
@@ -480,9 +491,6 @@ protected:
   // low-level interface for creating shader programs
   virtual std::shared_ptr<ShaderProgram> generateShaderProgram(const std::vector<ShaderStageSpecification>& stages,
                                                                DrawMode dm) = 0;
-
-  // Internal windowing and engine details
-  ImFontAtlas* globalFontAtlas = nullptr;
 
   // Default rule lists (see enum for explanation)
   std::vector<std::string> defaultRules_sceneObject{"GLSL_VERSION", "GLOBAL_FRAGMENT_FILTER", "LIGHT_MATCAP"};

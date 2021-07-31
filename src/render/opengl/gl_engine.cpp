@@ -30,10 +30,6 @@
 namespace polyscope {
 namespace render {
 
-// Forward declare compressed binary font functions
-unsigned int getCousineRegularCompressedSize();
-const unsigned int* getCousineRegularCompressedData();
-
 namespace backend_openGL3_glfw {
 
 GLEngine* glEngine = nullptr; // alias for global engine pointer
@@ -1708,7 +1704,6 @@ void GLEngine::initialize() {
 
 
 void GLEngine::initializeImGui() {
-
   bindDisplay();
 
   ImGui::CreateContext(); // must call once at start
@@ -1718,17 +1713,7 @@ void GLEngine::initializeImGui() {
   const char* glsl_version = "#version 150";
   ImGui_ImplOpenGL3_Init(glsl_version);
 
-  ImGuiIO& io = ImGui::GetIO();
-  ImFontConfig config;
-  config.OversampleH = 5;
-  config.OversampleV = 5;
-  ImFont* font = io.Fonts->AddFontFromMemoryCompressedTTF(getCousineRegularCompressedData(),
-                                                          getCousineRegularCompressedSize(), 15.0f, &config);
-  // io.OptResizeWindowsFromEdges = true;
-  // ImGui::StyleColorsLight();
-  setImGuiStyle();
-
-  globalFontAtlas = io.Fonts;
+  configureImGui();
 }
 
 void GLEngine::shutdownImGui() {
@@ -1937,6 +1922,16 @@ void GLEngine::applyTransparencySettings() {
   }
 }
 
+void GLEngine::setFrontFaceCCW(bool newVal) {
+  if (newVal == frontFaceCCW) return;
+  frontFaceCCW = newVal;
+  if (frontFaceCCW) {
+    glFrontFace(GL_CCW);
+  } else {
+    glFrontFace(GL_CW);
+  }
+}
+
 // == Factories
 std::shared_ptr<TextureBuffer> GLEngine::generateTextureBuffer(TextureFormat format, unsigned int size1D,
                                                                unsigned char* data) {
@@ -2072,9 +2067,9 @@ void GLEngine::populateDefaultShadersAndRules() {
   registeredShaderRules.insert({"TRANSPARENCY_PEEL_STRUCTURE", TRANSPARENCY_PEEL_STRUCTURE});
   registeredShaderRules.insert({"TRANSPARENCY_PEEL_GROUND", TRANSPARENCY_PEEL_GROUND});
   
-  registeredShaderRules.insert({"GENERATE_WORLD_POS", GENERATE_WORLD_POS});
-  registeredShaderRules.insert({"CULL_POS_FROM_WORLD", CULL_POS_FROM_WORLD});
-  registeredShaderRules.insert({"CULL_POS_FROM_ATTR", CULL_POS_FROM_ATTR});
+  registeredShaderRules.insert({"GENERATE_VIEW_POS", GENERATE_VIEW_POS});
+  registeredShaderRules.insert({"CULL_POS_FROM_VIEW", CULL_POS_FROM_VIEW});
+  //registeredShaderRules.insert({"CULL_POS_FROM_ATTR", CULL_POS_FROM_ATTR});
 
   // Lighting and shading things
   registeredShaderRules.insert({"LIGHT_MATCAP", LIGHT_MATCAP});
@@ -2097,16 +2092,20 @@ void GLEngine::populateDefaultShadersAndRules() {
   registeredShaderRules.insert({"MESH_PROPAGATE_VALUE2", MESH_PROPAGATE_VALUE2});
   registeredShaderRules.insert({"MESH_PROPAGATE_COLOR", MESH_PROPAGATE_COLOR});
   registeredShaderRules.insert({"MESH_PROPAGATE_HALFEDGE_VALUE", MESH_PROPAGATE_HALFEDGE_VALUE});
+  registeredShaderRules.insert({"MESH_PROPAGATE_CULLPOS", MESH_PROPAGATE_CULLPOS});
+  registeredShaderRules.insert({"MESH_PROPAGATE_TYPE_AND_BASECOLOR2_SHADE", MESH_PROPAGATE_TYPE_AND_BASECOLOR2_SHADE});
   registeredShaderRules.insert({"MESH_PROPAGATE_PICK", MESH_PROPAGATE_PICK});
 
   // sphere things
   registeredShaderRules.insert({"SPHERE_PROPAGATE_VALUE", SPHERE_PROPAGATE_VALUE});
   registeredShaderRules.insert({"SPHERE_PROPAGATE_VALUE2", SPHERE_PROPAGATE_VALUE2});
   registeredShaderRules.insert({"SPHERE_PROPAGATE_COLOR", SPHERE_PROPAGATE_COLOR});
+  registeredShaderRules.insert({"SPHERE_CULLPOS_FROM_CENTER", SPHERE_CULLPOS_FROM_CENTER});
   registeredShaderRules.insert({"SPHERE_VARIABLE_SIZE", SPHERE_VARIABLE_SIZE});
 
   // vector things
   registeredShaderRules.insert({"VECTOR_PROPAGATE_COLOR", VECTOR_PROPAGATE_COLOR});
+  registeredShaderRules.insert({"VECTOR_CULLPOS_FROM_TAIL", VECTOR_CULLPOS_FROM_TAIL});
   registeredShaderRules.insert({"TRANSFORMATION_GIZMO_VEC", TRANSFORMATION_GIZMO_VEC});
 
   // cylinder things
@@ -2115,6 +2114,7 @@ void GLEngine::populateDefaultShadersAndRules() {
   registeredShaderRules.insert({"CYLINDER_PROPAGATE_COLOR", CYLINDER_PROPAGATE_COLOR});
   registeredShaderRules.insert({"CYLINDER_PROPAGATE_BLEND_COLOR", CYLINDER_PROPAGATE_BLEND_COLOR});
   registeredShaderRules.insert({"CYLINDER_PROPAGATE_PICK", CYLINDER_PROPAGATE_PICK});
+  registeredShaderRules.insert({"CYLINDER_CULLPOS_FROM_MID", CYLINDER_CULLPOS_FROM_MID});
 
   // clang-format on
 };
