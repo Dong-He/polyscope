@@ -23,8 +23,8 @@
 
 #include "imgui.h"
 #define IMGUI_IMPL_OPENGL_LOADER_GLAD
-#include "examples/imgui_impl_glfw.h"
-#include "examples/imgui_impl_opengl3.h"
+#include "backends/imgui_impl_glfw.h"
+#include "backends/imgui_impl_opengl3.h"
 
 #include <unordered_map>
 
@@ -265,6 +265,7 @@ public:
 
   // === Windowing and framework things
   void makeContextCurrent() override;
+  void focusWindow() override;
   void showWindow() override;
   void hideWindow() override;
   void updateWindowSize(bool force = false) override;

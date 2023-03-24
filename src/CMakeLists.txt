@@ -1,5 +1,3 @@
-cmake_minimum_required(VERSION 3.1)
-
 # Maybe stop from CMAKEing in the wrong place
 if (CMAKE_BINARY_DIR STREQUAL CMAKE_SOURCE_DIR)
     message(FATAL_ERROR "Source and build directories cannot be the same. Go use the /build directory.")
@@ -28,6 +26,7 @@ if("${POLYSCOPE_BACKEND_OPENGL3_GLFW}")
     render/opengl/shaders/gizmo_shaders.cpp  
     render/opengl/shaders/histogram_shaders.cpp  
     render/opengl/shaders/surface_mesh_shaders.cpp  
+    render/opengl/shaders/volume_mesh_shaders.cpp  
     render/opengl/shaders/vector_shaders.cpp  
     render/opengl/shaders/sphere_shaders.cpp  
     render/opengl/shaders/ribbon_shaders.cpp  
@@ -85,6 +84,7 @@ if("${POLYSCOPE_BACKEND_OPENGL_MOCK}")
     render/opengl/shaders/gizmo_shaders.cpp  
     render/opengl/shaders/histogram_shaders.cpp  
     render/opengl/shaders/surface_mesh_shaders.cpp  
+    render/opengl/shaders/volume_mesh_shaders.cpp  
     render/opengl/shaders/vector_shaders.cpp  
     render/opengl/shaders/sphere_shaders.cpp  
     render/opengl/shaders/ribbon_shaders.cpp  
@@ -117,6 +117,7 @@ SET(SRCS
   internal.cpp
   state.cpp
   structure.cpp
+  group.cpp
   utilities.cpp
   view.cpp
   screenshot.cpp
@@ -178,6 +179,7 @@ SET(SRCS
   volume_mesh_vector_quantity.cpp
   
   # Rendering utilities
+  imgui_config.cpp
   vector_artist.cpp
   trace_vector_field.cpp
   ribbon_artist.cpp
@@ -214,8 +216,10 @@ SET(HEADERS
   ${INCLUDE_ROOT}/curve_network_vector_quantity.h
   ${INCLUDE_ROOT}/disjoint_sets.h
   ${INCLUDE_ROOT}/file_helpers.h
+  ${INCLUDE_ROOT}/group.h
   ${INCLUDE_ROOT}/histogram.h
   ${INCLUDE_ROOT}/image_scalar_artist.h
+  ${INCLUDE_ROOT}/imgui_config.h
   ${INCLUDE_ROOT}/messages.h
   ${INCLUDE_ROOT}/options.h
   ${INCLUDE_ROOT}/persistent_value.h
@@ -270,6 +274,10 @@ SET(HEADERS
 
 # Create a single library for the project
 add_library(polyscope ${SRCS} ${BACKEND_SRCS} ${HEADERS} ${BACKEND_HEADERS})
+
+# Mark the library target and its headers as installable
+install(TARGETS polyscope)
+install(FILES ${HEADERS} DESTINATION "${CMAKE_INSTALL_PREFIX}/include/polyscope")
 
 # Required compiler settings
 set_property(TARGET polyscope PROPERTY CXX_STANDARD 11)

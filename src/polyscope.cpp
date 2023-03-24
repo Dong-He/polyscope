@@ -59,17 +59,22 @@ void readPrefsFile() {
       inStream >> prefsJSON;
 
       // Set values
+      // Do some basic validation on the sizes first to work around bugs with bogus values getting written to init file
       if (prefsJSON.count("windowWidth") > 0) {
-        view::windowWidth = prefsJSON["windowWidth"];
+        int val = prefsJSON["windowWidth"];
+        if (val >= 64 && val < 10000) view::windowWidth = val;
       }
       if (prefsJSON.count("windowHeight") > 0) {
-        view::windowHeight = prefsJSON["windowHeight"];
+        int val = prefsJSON["windowHeight"];
+        if (val >= 64 && val < 10000) view::windowHeight = val;
       }
       if (prefsJSON.count("windowPosX") > 0) {
-        view::initWindowPosX = prefsJSON["windowPosX"];
+        int val = prefsJSON["windowPosX"];
+        if (val >= 0 && val < 10000) view::initWindowPosX = val;
       }
       if (prefsJSON.count("windowPosY") > 0) {
-        view::initWindowPosY = prefsJSON["windowPosY"];
+        int val = prefsJSON["windowPosY"];
+        if (val >= 0 && val < 10000) view::initWindowPosY = val;
       }
     }
 
@@ -85,11 +90,22 @@ void writePrefsFile() {
   // Update values as needed
   int posX, posY;
   std::tie(posX, posY) = render::engine->getWindowPos();
+  int windowWidth = view::windowWidth;
+  int windowHeight = view::windowHeight;
+
+  // Validate values. Don't write the prefs file if any of these values are obviously bogus (this seems to happen at
+  // least on Windows when the application is minimzed)
+  bool valuesValid = true;
+  valuesValid &= posX >= 0 && posX < 10000;
+  valuesValid &= posY >= 0 && posY < 10000;
+  valuesValid &= windowWidth >= 64 && windowWidth < 10000;
+  valuesValid &= windowHeight >= 64 && windowHeight < 10000;
+  if (!valuesValid) return;
 
   // Build json object
   json prefsJSON = {
-      {"windowWidth", view::windowWidth},
-      {"windowHeight", view::windowHeight},
+      {"windowWidth", windowWidth},
+      {"windowHeight", windowHeight},
       {"windowPosX", posX},
       {"windowPosY", posY},
   };
@@ -104,7 +120,7 @@ void writePrefsFile() {
 // === Core global functions
 
 void init(std::string backend) {
-  if (state::initialized) {
+  if (isInitialized()) {
     if (backend != state::backend) {
       throw std::runtime_error("re-initializing with different backend is not supported");
     }
@@ -130,7 +146,16 @@ void init(std::string backend) {
   view::invalidateView();
 
   state::initialized = true;
+  state::doDefaultMouseInteraction = true;
 }
+
+void checkInitialized() {
+  if (!state::initialized) {
+    throw std::runtime_error("Polyscope has not been initialized");
+  }
+}
+
+bool isInitialized() { return state::initialized; }
 
 void pushContext(std::function<void()> callbackFunction, bool drawDefaultUI) {
 
@@ -139,7 +164,10 @@ void pushContext(std::function<void()> callbackFunction, bool drawDefaultUI) {
   ImGuiIO& oldIO = ImGui::GetIO(); // used to copy below, see note
   ImGui::SetCurrentContext(newContext);
 
-  render::engine->setImGuiStyle();
+  if (options::configureImGuiStyleCallback) {
+    options::configureImGuiStyleCallback();
+  }
+
   ImGui::GetIO() = oldIO; // Copy all of the old IO values to new. With ImGUI 1.76 (and some previous versions), this
                           // was necessary to fix a bug where keys like delete, etc would break in subcontexts. The
                           // problem was that the key mappings (e.g. GLFW_KEY_BACKSPACE --> ImGuiKey_Backspace) need to
@@ -188,6 +216,8 @@ void popContext() {
   contextStack.pop_back();
 }
 
+ImGuiContext* getCurrentContext() { return contextStack.empty() ? nullptr : contextStack.back().context; }
+
 void requestRedraw() { redrawNextFrame = true; }
 bool redrawRequested() { return redrawNextFrame; }
 
@@ -204,8 +234,12 @@ void drawStructures() {
       s.second->draw();
     }
   }
-}
 
+  // Also render any slice plane geometry
+  for (SlicePlane* s : state::slicePlanes) {
+    s->drawGeometry();
+  }
+}
 
 namespace {
 
@@ -228,86 +262,89 @@ void processInputEvents() {
   }
 
   // Handle scroll events for 3D view
-  if (!io.WantCaptureMouse && !widgetCapturedMouse) {
-    double xoffset = io.MouseWheelH;
-    double yoffset = io.MouseWheel;
+  if (state::doDefaultMouseInteraction) {
+    if (!io.WantCaptureMouse && !widgetCapturedMouse) {
+      double xoffset = io.MouseWheelH;
+      double yoffset = io.MouseWheel;
 
-    if (xoffset != 0 || yoffset != 0) {
-      requestRedraw();
+      if (xoffset != 0 || yoffset != 0) {
+        requestRedraw();
 
-      // On some setups, shift flips the scroll direction, so take the max
-      // scrolling in any direction
-      double maxScroll = xoffset;
-      if (std::abs(yoffset) > std::abs(xoffset)) {
-        maxScroll = yoffset;
-      }
+        // On some setups, shift flips the scroll direction, so take the max
+        // scrolling in any direction
+        double maxScroll = xoffset;
+        if (std::abs(yoffset) > std::abs(xoffset)) {
+          maxScroll = yoffset;
+        }
 
-      // Pass camera commands to the camera
-      if (maxScroll != 0.0) {
-        bool scrollClipPlane = io.KeyShift;
+        // Pass camera commands to the camera
+        if (maxScroll != 0.0) {
+          bool scrollClipPlane = io.KeyShift;
 
-        if (scrollClipPlane) {
-          view::processClipPlaneShift(maxScroll);
-        } else {
-          view::processZoom(maxScroll);
+          if (scrollClipPlane) {
+            view::processClipPlaneShift(maxScroll);
+          } else {
+            view::processZoom(maxScroll);
+          }
         }
       }
     }
-  }
 
-  // === Mouse inputs
-  if (!io.WantCaptureMouse && !widgetCapturedMouse) {
+    // === Mouse inputs
+    if (!io.WantCaptureMouse && !widgetCapturedMouse) {
 
-    // Process drags
-    bool dragLeft = ImGui::IsMouseDragging(0);
-    bool dragRight = !dragLeft && ImGui::IsMouseDragging(1); // left takes priority, so only one can be true
-    if (dragLeft || dragRight) {
+      // Process drags
+      bool dragLeft = ImGui::IsMouseDragging(0);
+      bool dragRight = !dragLeft && ImGui::IsMouseDragging(1); // left takes priority, so only one can be true
+      if (dragLeft || dragRight) {
 
-      glm::vec2 dragDelta{io.MouseDelta.x / view::windowWidth, -io.MouseDelta.y / view::windowHeight};
-      dragDistSinceLastRelease += std::abs(dragDelta.x);
-      dragDistSinceLastRelease += std::abs(dragDelta.y);
+        glm::vec2 dragDelta{io.MouseDelta.x / view::windowWidth, -io.MouseDelta.y / view::windowHeight};
+        dragDistSinceLastRelease += std::abs(dragDelta.x);
+        dragDistSinceLastRelease += std::abs(dragDelta.y);
 
-      // exactly one of these will be true
-      bool isRotate = dragLeft && !io.KeyShift && !io.KeyCtrl;
-      bool isTranslate = (dragLeft && io.KeyShift && !io.KeyCtrl) || dragRight;
-      bool isDragZoom = dragLeft && io.KeyShift && io.KeyCtrl;
+        // exactly one of these will be true
+        bool isRotate = dragLeft && !io.KeyShift && !io.KeyCtrl;
+        bool isTranslate = (dragLeft && io.KeyShift && !io.KeyCtrl) || dragRight;
+        bool isDragZoom = dragLeft && io.KeyShift && io.KeyCtrl;
 
-      if (isDragZoom) {
-        view::processZoom(dragDelta.y * 5);
-      }
-      if (isRotate) {
-        glm::vec2 currPos{io.MousePos.x / view::windowWidth, (view::windowHeight - io.MousePos.y) / view::windowHeight};
-        currPos = (currPos * 2.0f) - glm::vec2{1.0, 1.0};
-        if (std::abs(currPos.x) <= 1.0 && std::abs(currPos.y) <= 1.0) {
-          view::processRotate(currPos - 2.0f * dragDelta, currPos);
+        if (isDragZoom) {
+          view::processZoom(dragDelta.y * 5);
+        }
+        if (isRotate) {
+          glm::vec2 currPos{io.MousePos.x / view::windowWidth,
+                            (view::windowHeight - io.MousePos.y) / view::windowHeight};
+          currPos = (currPos * 2.0f) - glm::vec2{1.0, 1.0};
+          if (std::abs(currPos.x) <= 1.0 && std::abs(currPos.y) <= 1.0) {
+            view::processRotate(currPos - 2.0f * dragDelta, currPos);
+          }
+        }
+        if (isTranslate) {
+          view::processTranslate(dragDelta);
         }
       }
-      if (isTranslate) {
-        view::processTranslate(dragDelta);
-      }
-    }
 
-    // Click picks
-    float dragIgnoreThreshold = 0.01;
-    if (ImGui::IsMouseReleased(0)) {
+      // Click picks
+      float dragIgnoreThreshold = 0.01;
+      if (ImGui::IsMouseReleased(0)) {
 
-      // Don't pick at the end of a long drag
-      if (dragDistSinceLastRelease < dragIgnoreThreshold) {
-        ImVec2 p = ImGui::GetMousePos();
-        std::pair<Structure*, size_t> pickResult =
-            pick::evaluatePickQuery(io.DisplayFramebufferScale.x * p.x, io.DisplayFramebufferScale.y * p.y);
-        pick::setSelection(pickResult);
-      }
+        // Don't pick at the end of a long drag
+        if (dragDistSinceLastRelease < dragIgnoreThreshold) {
+          ImVec2 p = ImGui::GetMousePos();
+          std::pair<Structure*, size_t> pickResult =
+              pick::evaluatePickQuery(io.DisplayFramebufferScale.x * p.x, io.DisplayFramebufferScale.y * p.y);
+          pick::setSelection(pickResult);
+        }
 
-      // Reset the drag distance after any release
-      dragDistSinceLastRelease = 0.0;
-    }
-    // Clear pick
-    if (ImGui::IsMouseReleased(1)) {
-      if (dragDistSinceLastRelease < dragIgnoreThreshold) {
-        pick::resetSelection();
+        // Reset the drag distance after any release
+        dragDistSinceLastRelease = 0.0;
       }
-      dragDistSinceLastRelease = 0.0;
+      // Clear pick
+      if (ImGui::IsMouseReleased(1)) {
+        if (dragDistSinceLastRelease < dragIgnoreThreshold) {
+          pick::resetSelection();
+        }
+        dragDistSinceLastRelease = 0.0;
+      }
     }
   }
 
@@ -327,6 +364,7 @@ void processInputEvents() {
     }
   }
 }
+
 
 void renderSlicePlanes() {
   for (SlicePlane* s : state::slicePlanes) {
@@ -414,6 +452,10 @@ void renderSceneToScreen() {
     render::engine->applyLightingTransform(render::engine->sceneColorFinal);
   }
 }
+
+auto lastMainLoopIterTime = std::chrono::steady_clock::now();
+
+} // namespace
 
 void buildPolyscopeGui() {
 
@@ -524,6 +566,17 @@ void buildStructureGui() {
 
   ImGui::Begin("Structures", &showStructureWindow);
 
+  // only show groups if there are any
+  if (state::groups.size() > 0) {
+    if (ImGui::CollapsingHeader("Groups", ImGuiTreeNodeFlags_DefaultOpen)) {
+      for (auto x : state::groups) {
+        if (x.second->isRootGroup()) {
+          x.second->buildUI();
+        }
+      }
+    }
+  }
+
   for (auto catMapEntry : state::structures) {
     std::string catName = catMapEntry.first;
 
@@ -555,38 +608,6 @@ void buildStructureGui() {
   ImGui::End();
 }
 
-void buildUserGuiAndInvokeCallback() {
-
-  if (!options::invokeUserCallbackForNestedShow && contextStack.size() > 2) {
-    return;
-  }
-
-  if (state::userCallback) {
-    ImGui::PushID("user_callback");
-
-    if (options::openImGuiWindowForUserCallback) {
-      ImGui::SetNextWindowPos(ImVec2(view::windowWidth - (rightWindowsWidth + imguiStackMargin), imguiStackMargin));
-      ImGui::SetNextWindowSize(ImVec2(rightWindowsWidth, 0.));
-
-      ImGui::Begin("Command UI", nullptr);
-    }
-
-    state::userCallback();
-
-    if (options::openImGuiWindowForUserCallback) {
-      rightWindowsWidth = ImGui::GetWindowWidth();
-      lastWindowHeightUser = imguiStackMargin + ImGui::GetWindowHeight();
-      ImGui::End();
-    } else {
-      lastWindowHeightUser = imguiStackMargin;
-    }
-
-    ImGui::PopID();
-  } else {
-    lastWindowHeightUser = imguiStackMargin;
-  }
-}
-
 void buildPickGui() {
   if (pick::haveSelection()) {
 
@@ -606,11 +627,39 @@ void buildPickGui() {
   }
 }
 
-auto lastMainLoopIterTime = std::chrono::steady_clock::now();
+void buildUserGuiAndInvokeCallback() {
 
-} // namespace
+  if (!options::invokeUserCallbackForNestedShow && contextStack.size() > 2) {
+    return;
+  }
 
-void draw(bool withUI) {
+  if (state::userCallback) {
+
+    if (options::buildGui && options::openImGuiWindowForUserCallback) {
+      ImGui::PushID("user_callback");
+      ImGui::SetNextWindowPos(ImVec2(view::windowWidth - (rightWindowsWidth + imguiStackMargin), imguiStackMargin));
+      ImGui::SetNextWindowSize(ImVec2(rightWindowsWidth, 0.));
+
+      ImGui::Begin("Command UI", nullptr);
+    }
+
+    state::userCallback();
+
+    if (options::buildGui && options::openImGuiWindowForUserCallback) {
+      rightWindowsWidth = ImGui::GetWindowWidth();
+      lastWindowHeightUser = imguiStackMargin + ImGui::GetWindowHeight();
+      ImGui::End();
+      ImGui::PopID();
+    } else {
+      lastWindowHeightUser = imguiStackMargin;
+    }
+
+  } else {
+    lastWindowHeightUser = imguiStackMargin;
+  }
+}
+
+void draw(bool withUI, bool withContextCallback) {
   processLazyProperties();
 
   // Update buffer and context
@@ -633,19 +682,21 @@ void draw(bool withUI) {
       // is necessary when ImGui::Render() happens below.
       buildUserGuiAndInvokeCallback();
 
-      buildPolyscopeGui();
-      buildStructureGui();
-      buildPickGui();
+      if (options::buildGui) {
+        buildPolyscopeGui();
+        buildStructureGui();
+        buildPickGui();
 
-      for (Widget* w : state::widgets) {
-        w->buildGUI();
+        for (Widget* w : state::widgets) {
+          w->buildGUI();
+        }
       }
     }
   }
 
   // Execute the context callback, if there is one.
   // This callback is Polyscope implementation detail, which is distinct from the userCallback (which gets called below)
-  if (contextStack.back().callback) {
+  if (withContextCallback && contextStack.back().callback) {
     (contextStack.back().callback)();
   }
 
@@ -710,6 +761,9 @@ void show(size_t forFrames) {
                            "must initialize Polyscope with polyscope::init() before calling polyscope::show().");
   }
 
+  // the popContext() doesn't quit until _after_ the last frame, so we need to decrement by 1 to get the count right
+  if (forFrames > 0) forFrames--;
+
   auto checkFrames = [&]() {
     if (forFrames == 0) {
       popContext();
@@ -717,6 +771,11 @@ void show(size_t forFrames) {
       forFrames--;
     }
   };
+
+  if (options::giveFocusOnShow) {
+    render::engine->focusWindow();
+  }
+
   pushContext(checkFrames);
 
   if (options::usePrefsFile) {
@@ -729,7 +788,7 @@ void show(size_t forFrames) {
   }
 }
 
-void shutdown(int exitCode) {
+void shutdown() {
 
   // TODO should we make an effort to destruct everything here?
   if (options::usePrefsFile) {
@@ -737,8 +796,75 @@ void shutdown(int exitCode) {
   }
 
   render::engine->shutdownImGui();
+}
 
-  std::exit(exitCode);
+bool registerGroup(std::string name) {
+  // check if group already exists
+  bool inUse = state::groups.find(name) != state::groups.end();
+  if (inUse) {
+    polyscope::error("Attempted to register group with name " + name + ", but a group with that name already exists");
+    return false;
+  }
+
+  checkInitialized();
+  Group* g = new Group(name);
+  // add to the group map
+  state::groups[g->name] = g;
+
+  return true;
+}
+
+bool setParentGroupOfGroup(std::string child, std::string parent) {
+  // check if child exists
+  bool childExists = state::groups.find(child) != state::groups.end();
+  if (!childExists) {
+    polyscope::error("Attempted to set parent of group " + child + ", but no group with that name exists");
+    return false;
+  }
+
+  // check if parent exists
+  bool parentExists = state::groups.find(parent) != state::groups.end();
+  if (!parentExists) {
+    polyscope::error("Attempted to set parent of group " + child + " to " + parent +
+                     ", but no group with that name exists");
+    return false;
+  }
+
+  // set the parent
+  state::groups[parent]->addChildGroup(state::groups[child]);
+  return true;
+}
+
+bool setParentGroupOfStructure(std::string typeName, std::string child, std::string parent) {
+  // check if parent exists
+  bool parentExists = state::groups.find(parent) != state::groups.end();
+  if (!parentExists) {
+    polyscope::error("Attempted to set parent of " + typeName + " " + child + " to " + parent +
+                     ", but no group with that name exists");
+    return false;
+  }
+
+  // Make sure a map for the type exists
+  if (state::structures.find(typeName) == state::structures.end()) {
+    state::structures[typeName] = std::map<std::string, Structure*>();
+  }
+  std::map<std::string, Structure*>& sMap = state::structures[typeName];
+
+  // check if child exists
+  bool childExists = sMap.find(child) != sMap.end();
+  if (!childExists) {
+    polyscope::error("Attempted to set parent of " + typeName + " " + child + ", but no " + typeName +
+                     "with that name exists");
+    return false;
+  }
+
+  // set the parent
+  state::groups[parent]->addChildStructure(sMap[child]);
+  return true;
+}
+
+bool setParentGroupOfStructure(Structure* child, std::string parent) {
+  return setParentGroupOfStructure(child->typeName(), child->name, parent);
 }
 
 bool registerStructure(Structure* s, bool replaceIfPresent) {
@@ -779,6 +905,8 @@ bool registerStructure(Structure* s, bool replaceIfPresent) {
 }
 
 Structure* getStructure(std::string type, std::string name) {
+
+  if (type == "" || name == "") return nullptr;
 
   // If there are no structures of that type it is an automatic fail
   if (state::structures.find(type) == state::structures.end()) {
@@ -823,6 +951,40 @@ bool hasStructure(std::string type, std::string name) {
   return sMap.find(name) != sMap.end();
 }
 
+void setGroupEnabled(std::string name, bool enabled) {
+  // Check if group exists
+  if (state::groups.find(name) == state::groups.end()) {
+    error("No group with name " + name + " registered");
+    return;
+  }
+
+  // Group exists, set it
+  state::groups[name]->setEnabled(enabled);
+  return;
+}
+
+void removeGroup(std::string name, bool errorIfAbsent) {
+  // Check if group exists
+  if (state::groups.find(name) == state::groups.end()) {
+    if (errorIfAbsent) {
+      error("No group with name " + name + " registered");
+    }
+    return;
+  }
+
+  // Group exists, remove it
+  Group* g = state::groups[name];
+  state::groups.erase(g->name);
+  delete g;
+  return;
+}
+
+void removeAllGroups() {
+  for (auto& g : state::groups) {
+    delete g.second;
+  }
+  state::groups.clear();
+}
 
 void removeStructure(std::string type, std::string name, bool errorIfAbsent) {
 
@@ -845,6 +1007,10 @@ void removeStructure(std::string type, std::string name, bool errorIfAbsent) {
 
   // Structure exists, remove it
   Structure* s = sMap[name];
+  // remove it from all existing groups
+  for (auto& g : state::groups) {
+    g.second->removeChildStructure(s);
+  }
   pick::resetSelectionIfStructure(s);
   sMap.erase(s->name);
   delete s;
@@ -993,6 +1159,14 @@ void processLazyProperties() {
 };
 
 void updateStructureExtents() {
+
+  if (!options::automaticallyComputeSceneExtents) {
+    return;
+  }
+
+  // Note: the cost multiple calls to this function scales only with the number of structures, not the size of the data
+  // in those structures, because structures internally cache the extents of their data.
+
   // Compute length scale and bbox as the max of all structures
   state::lengthScale = 0.0;
   glm::vec3 minBbox = glm::vec3{1, 1, 1} * std::numeric_limits<float>::infinity();
@@ -1015,7 +1189,7 @@ void updateStructureExtents() {
 
   // If we got a degenerate bounding box, perturb it slightly
   if (minBbox == maxBbox) {
-    double offsetScale = (state::lengthScale == 0) ? 1e-5 : state::lengthScale*1e-5;
+    double offsetScale = (state::lengthScale == 0) ? 1e-5 : state::lengthScale * 1e-5;
     glm::vec3 offset{offsetScale, offsetScale, offsetScale};
     minBbox = minBbox - offset / 2.f;
     maxBbox = maxBbox + offset / 2.f;
@@ -1031,9 +1205,11 @@ void updateStructureExtents() {
     state::lengthScale = glm::length(maxBbox - minBbox);
   }
 
-  // Center is center of bounding box
-  state::center = 0.5f * (minBbox + maxBbox);
+  requestRedraw();
 }
 
+namespace state {
+glm::vec3 center() { return 0.5f * (std::get<0>(state::boundingBox) + std::get<1>(state::boundingBox)); }
+} // namespace state
 
 } // namespace polyscope
