@@ -1,7 +1,10 @@
+// Copyright 2017-2023, Nicholas Sharp and the Polyscope contributors. https://polyscope.run
+
 #pragma once
 
 #include "polyscope/persistent_value.h"
 #include "polyscope/render/engine.h"
+#include "polyscope/render/managed_buffer.h"
 #include "polyscope/transformation_gizmo.h"
 #include "polyscope/utilities.h"
 #include "polyscope/widget.h"
@@ -35,6 +38,7 @@ public:
 
   const std::string name;
   const std::string postfix;
+  std::string uniquePrefix();
 
   // Set the position and orientation of the plane
   // planePosition is any 3D position which the plane touches (the center of the plane)
@@ -87,6 +91,10 @@ protected:
 
   // Widget that wraps the transform
   TransformationGizmo transformGizmo;
+
+  // these are optionally filled when slice-visualizing into a volume mesh
+  std::array<std::vector<uint32_t>, 4> sliceBufferDataArr;
+  std::array<render::ManagedBuffer<uint32_t>, 4> sliceBufferArr;
 
   std::shared_ptr<render::ShaderProgram> planeProgram;
 

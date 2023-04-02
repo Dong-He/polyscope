@@ -1,4 +1,5 @@
-// Copyright 2017-2019, Nicholas Sharp and the Polyscope contributors. http://polyscope.run.
+// Copyright 2017-2023, Nicholas Sharp and the Polyscope contributors. https://polyscope.run
+
 
 #include "polyscope/render/opengl/shaders/cylinder_shaders.h"
 
@@ -14,13 +15,13 @@ const ShaderStageSpecification FLEX_CYLINDER_VERT_SHADER = {
 
     // uniforms
     {
-        {"u_modelView", DataType::Matrix44Float},
+        {"u_modelView", RenderDataType::Matrix44Float},
     }, 
 
     // attributes
     {
-        {"a_position_tail", DataType::Vector3Float},
-        {"a_position_tip", DataType::Vector3Float},
+        {"a_position_tail", RenderDataType::Vector3Float},
+        {"a_position_tip", RenderDataType::Vector3Float},
     },
 
     {}, // textures
@@ -52,8 +53,8 @@ const ShaderStageSpecification FLEX_CYLINDER_GEOM_SHADER = {
     
     // uniforms
     {
-        {"u_projMatrix", DataType::Matrix44Float},
-        {"u_radius", DataType::Float},
+        {"u_projMatrix", RenderDataType::Matrix44Float},
+        {"u_radius", RenderDataType::Float},
     }, 
 
     // attributes
@@ -138,10 +139,10 @@ const ShaderStageSpecification FLEX_CYLINDER_FRAG_SHADER = {
     
     // uniforms
     {
-        {"u_projMatrix", DataType::Matrix44Float},
-        {"u_invProjMatrix", DataType::Matrix44Float},
-        {"u_viewport", DataType::Vector4Float},
-        {"u_radius", DataType::Float},
+        {"u_projMatrix", RenderDataType::Matrix44Float},
+        {"u_invProjMatrix", RenderDataType::Matrix44Float},
+        {"u_viewport", RenderDataType::Vector4Float},
+        {"u_radius", RenderDataType::Float},
     }, 
 
     { }, // attributes
@@ -163,7 +164,7 @@ R"(
 
         float LARGE_FLOAT();
         vec3 fragmentViewPosition(vec4 viewport, vec2 depthRange, mat4 invProjMat, vec4 fragCoord);
-        bool rayCylinderIntersection(vec3 rayStart, vec3 rayDir, vec3 cylTail, vec3 cylTip, float cylTipRad, float cylTailRad, out float tHit, out vec3 pHit, out vec3 nHit);
+        bool rayTaperedCylinderIntersection(vec3 rayStart, vec3 rayDir, vec3 cylTail, vec3 cylTip, float cylRadTail, float cylRadTip, out float tHit, out vec3 pHit, out vec3 nHit);
         float fragDepthFromView(mat4 projMat, vec2 depthRange, vec3 viewPoint);
         
         ${ FRAG_DECLARATIONS }$
@@ -183,7 +184,7 @@ R"(
            float tHit;
            vec3 pHit;
            vec3 nHit;
-           rayCylinderIntersection(vec3(0., 0., 0), viewRay, tailView, tipView, tipRadius, tailRadius, tHit, pHit, nHit);
+           rayTaperedCylinderIntersection(vec3(0., 0., 0), viewRay, tailView, tipView, tailRadius, tipRadius, tHit, pHit, nHit);
            if(tHit >= LARGE_FLOAT()) {
               discard;
            }
@@ -241,7 +242,7 @@ const ShaderReplacementRule CYLINDER_PROPAGATE_VALUE (
     },
     /* uniforms */ {},
     /* attributes */ {
-      {"a_value", DataType::Float},
+      {"a_value", RenderDataType::Float},
     },
     /* textures */ {}
 );
@@ -282,8 +283,8 @@ const ShaderReplacementRule CYLINDER_PROPAGATE_BLEND_VALUE (
     },
     /* uniforms */ {},
     /* attributes */ {
-      {"a_value_tail", DataType::Float},
-      {"a_value_tip", DataType::Float},
+      {"a_value_tail", RenderDataType::Float},
+      {"a_value_tip", RenderDataType::Float},
     },
     /* textures */ {}
 );
@@ -314,7 +315,7 @@ const ShaderReplacementRule CYLINDER_PROPAGATE_COLOR (
     },
     /* uniforms */ {},
     /* attributes */ {
-      {"a_color", DataType::Vector3Float},
+      {"a_color", RenderDataType::Vector3Float},
     },
     /* textures */ {}
 );
@@ -355,8 +356,8 @@ const ShaderReplacementRule CYLINDER_PROPAGATE_BLEND_COLOR (
     },
     /* uniforms */ {},
     /* attributes */ {
-      {"a_color_tail", DataType::Vector3Float},
-      {"a_color_tip", DataType::Vector3Float},
+      {"a_color_tail", RenderDataType::Vector3Float},
+      {"a_color_tip", RenderDataType::Vector3Float},
     },
     /* textures */ {}
 );
@@ -424,9 +425,9 @@ const ShaderReplacementRule CYLINDER_PROPAGATE_PICK (
     },
     /* uniforms */ {},
     /* attributes */ {
-      {"a_color_tail", DataType::Vector3Float},
-      {"a_color_tip", DataType::Vector3Float},
-      {"a_color_edge", DataType::Vector3Float},
+      {"a_color_tail", RenderDataType::Vector3Float},
+      {"a_color_tip", RenderDataType::Vector3Float},
+      {"a_color_edge", RenderDataType::Vector3Float},
     },
     /* textures */ {}
 );
@@ -469,8 +470,8 @@ const ShaderReplacementRule CYLINDER_VARIABLE_SIZE (
     },
     /* uniforms */ {},
     /* attributes */ {
-      {"a_tipRadius", DataType::Float},
-      {"a_tailRadius", DataType::Float},
+      {"a_tipRadius", RenderDataType::Float},
+      {"a_tailRadius", RenderDataType::Float},
     },
     /* textures */ {}
 );

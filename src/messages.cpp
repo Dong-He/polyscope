@@ -1,4 +1,5 @@
-// Copyright 2017-2019, Nicholas Sharp and the Polyscope contributors. http://polyscope.run.
+// Copyright 2017-2023, Nicholas Sharp and the Polyscope contributors. https://polyscope.run
+
 #include "polyscope/messages.h"
 
 #include "imgui.h"
@@ -212,11 +213,17 @@ void error(std::string message) {
   if (options::errorsThrowExceptions) {
     throw std::logic_error(options::printPrefix + message);
   }
+}
 
-  auto func = std::bind(buildErrorUI, message, false);
-  
-  render::engine->showWindow();
-  pushContext(func, false);
+void exception(std::string message) {
+
+  message = options::printPrefix + " [EXCEPTION] " + message;
+
+  if (options::verbosity > 0) {
+    std::cout << message << std::endl;
+  }
+
+  throw std::runtime_error(message);
 }
 
 void terminatingError(std::string message) {

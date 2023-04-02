@@ -1,4 +1,5 @@
-// Copyright 2017-2019, Nicholas Sharp and the Polyscope contributors. http://polyscope.run.
+// Copyright 2017-2023, Nicholas Sharp and the Polyscope contributors. https://polyscope.run
+
 #include "polyscope/structure.h"
 
 #include "polyscope/polyscope.h"
@@ -25,6 +26,7 @@ Structure::~Structure(){};
 Structure* Structure::setEnabled(bool newEnabled) {
   if (newEnabled == isEnabled()) return this;
   enabled = newEnabled;
+  requestRedraw();
   return this;
 };
 
@@ -214,6 +216,8 @@ void Structure::rescaleToUnit() {
   objectTransform = newTrans * objectTransform.get();
   updateStructureExtents();
 }
+
+bool Structure::hasExtents() { return true; }
 
 glm::mat4 Structure::getModelView() { return view::getCameraViewMatrix() * objectTransform.get(); }
 

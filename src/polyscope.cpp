@@ -1,4 +1,5 @@
-// Copyright 2017-2019, Nicholas Sharp and the Polyscope contributors. http://polyscope.run.
+// Copyright 2017-2023, Nicholas Sharp and the Polyscope contributors. https://polyscope.run
+
 #include "polyscope/polyscope.h"
 
 #include <chrono>
@@ -17,6 +18,7 @@
 #include "json/json.hpp"
 using json = nlohmann::json;
 
+#include "backends/imgui_impl_opengl3.h"
 
 namespace polyscope {
 
@@ -45,6 +47,7 @@ float lastWindowHeightUser = 200;
 float leftWindowsWidth = 305;
 float rightWindowsWidth = 500;
 
+auto lastMainLoopIterTime = std::chrono::steady_clock::now();
 
 const std::string prefsFilename = ".polyscope.ini";
 
@@ -81,7 +84,7 @@ void readPrefsFile() {
   }
   // We never really care if something goes wrong while loading preferences, so eat all exceptions
   catch (...) {
-    polyscope::warning("Parsing of prefs file failed");
+    polyscope::warning("Parsing of prefs file .polyscope.ini failed");
   }
 }
 
@@ -122,7 +125,7 @@ void writePrefsFile() {
 void init(std::string backend) {
   if (isInitialized()) {
     if (backend != state::backend) {
-      throw std::runtime_error("re-initializing with different backend is not supported");
+      exception("re-initializing with different backend is not supported");
     }
     // otherwise silently allow multiple-init
     return;
@@ -140,8 +143,10 @@ void init(std::string backend) {
   // Initialie ImGUI
   IMGUI_CHECKVERSION();
   render::engine->initializeImGui();
-  // push a fake context which will never be used (but dodges some invalidation issues)
-  contextStack.push_back(ContextEntry{ImGui::GetCurrentContext(), nullptr, false});
+
+  // Create an initial context based context. Note that calling show() never actually uses this context, because it
+  // pushes a new one each time. But using frameTick() may use this context.
+  contextStack.push_back(ContextEntry{ImGui::GetCurrentContext(), nullptr, true});
 
   view::invalidateView();
 
@@ -151,7 +156,7 @@ void init(std::string backend) {
 
 void checkInitialized() {
   if (!state::initialized) {
-    throw std::runtime_error("Polyscope has not been initialized");
+    exception("Polyscope has not been initialized");
   }
 }
 
@@ -176,9 +181,8 @@ void pushContext(std::function<void()> callbackFunction, bool drawDefaultUI) {
 
   if (contextStack.size() > 50) {
     // Catch bugs with nested show()
-    throw std::runtime_error(
-        "Uh oh, polyscope::show() was recusively MANY times (depth > 50), this is probably a bug. Perhaps "
-        "you are accidentally calling show every time polyscope::userCallback executes?");
+    exception("Uh oh, polyscope::show() was recusively MANY times (depth > 50), this is probably a bug. Perhaps "
+              "you are accidentally calling show every time polyscope::userCallback executes?");
   };
 
   // Make sure the window is visible
@@ -187,6 +191,19 @@ void pushContext(std::function<void()> callbackFunction, bool drawDefaultUI) {
   // Re-enter main loop until the context has been popped
   size_t currentContextStackSize = contextStack.size();
   while (contextStack.size() >= currentContextStackSize) {
+
+    // The windowing system will let the main loop busy-loop on some platforms. Make sure that doesn't happen.
+    if (options::maxFPS != -1) {
+      auto currTime = std::chrono::steady_clock::now();
+      long microsecPerLoop = 1000000 / options::maxFPS;
+      microsecPerLoop = (95 * microsecPerLoop) / 100; // give a little slack so we actually hit target fps
+      while (std::chrono::duration_cast<std::chrono::microseconds>(currTime - lastMainLoopIterTime).count() <
+             microsecPerLoop) {
+        std::this_thread::yield();
+        currTime = std::chrono::steady_clock::now();
+      }
+    }
+    lastMainLoopIterTime = std::chrono::steady_clock::now();
 
     mainLoopIteration();
 
@@ -210,13 +227,25 @@ void pushContext(std::function<void()> callbackFunction, bool drawDefaultUI) {
 
 void popContext() {
   if (contextStack.empty()) {
-    error("Called popContext() too many times");
+    exception("Called popContext() too many times");
     return;
   }
   contextStack.pop_back();
 }
 
 ImGuiContext* getCurrentContext() { return contextStack.empty() ? nullptr : contextStack.back().context; }
+
+void frameTick() {
+
+  // Make sure we're initialized
+  if (!state::initialized) {
+    exception("must initialize Polyscope with polyscope::init() before calling polyscope::frameTick().");
+  }
+
+  render::engine->showWindow();
+
+  mainLoopIteration();
+}
 
 void requestRedraw() { redrawNextFrame = true; }
 bool redrawRequested() { return redrawNextFrame; }
@@ -227,10 +256,6 @@ void drawStructures() {
 
   for (auto catMap : state::structures) {
     for (auto s : catMap.second) {
-      // make sure the right settings are active
-      // render::engine->setDepthMode();
-      // render::engine->applyTransparencySettings();
-
       s.second->draw();
     }
   }
@@ -238,6 +263,16 @@ void drawStructures() {
   // Also render any slice plane geometry
   for (SlicePlane* s : state::slicePlanes) {
     s->drawGeometry();
+  }
+}
+
+void drawStructuresDelayed() {
+  // "delayed" drawing allows structures to render things which should be rendered after most of the scene has been
+  // drawn
+  for (auto catMap : state::structures) {
+    for (auto s : catMap.second) {
+      s.second->drawDelayed();
+    }
   }
 }
 
@@ -416,6 +451,8 @@ void renderScene() {
       if (!isRedraw) {
         // Only on first pass (kinda weird, but works out, and doesn't really matter)
         renderSlicePlanes();
+        render::engine->applyTransparencySettings();
+        drawStructuresDelayed();
       }
 
       // Composite the result of this pass in to the result buffer
@@ -431,12 +468,15 @@ void renderScene() {
 
   } else {
     // Normal case: single render pass
-    render::engine->applyTransparencySettings();
 
+    render::engine->applyTransparencySettings();
     drawStructures();
 
     render::engine->groundPlane.draw();
     renderSlicePlanes();
+
+    render::engine->applyTransparencySettings();
+    drawStructuresDelayed();
 
     render::engine->sceneBuffer->blitTo(render::engine->sceneBufferFinal.get());
   }
@@ -452,8 +492,6 @@ void renderSceneToScreen() {
     render::engine->applyLightingTransform(render::engine->sceneColorFinal);
   }
 }
-
-auto lastMainLoopIterTime = std::chrono::steady_clock::now();
 
 } // namespace
 
@@ -532,6 +570,11 @@ void buildPolyscopeGui() {
   // Debug options tree
   ImGui::SetNextTreeNodeOpen(false, ImGuiCond_FirstUseEver);
   if (ImGui::TreeNode("Debug")) {
+
+    // fps
+    ImGui::Text("Rolling: %.1f ms/frame (%.1f fps)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
+    ImGui::Text("Last: %.1f ms/frame (%.1f fps)", ImGui::GetIO().DeltaTime * 1000.f, 1.f / ImGui::GetIO().DeltaTime);
+
     if (ImGui::Button("Force refresh")) {
       refresh();
     }
@@ -547,8 +590,6 @@ void buildPolyscopeGui() {
     ImGui::TreePop();
   }
 
-  // fps
-  ImGui::Text("%.1f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
 
   lastWindowHeightPolyscope = imguiStackMargin + ImGui::GetWindowHeight();
   leftWindowsWidth = ImGui::GetWindowWidth();
@@ -630,6 +671,7 @@ void buildPickGui() {
 void buildUserGuiAndInvokeCallback() {
 
   if (!options::invokeUserCallbackForNestedShow && contextStack.size() > 2) {
+    // NOTE: this may have funky interactions with manually calling frameTick()
     return;
   }
 
@@ -727,19 +769,6 @@ void mainLoopIteration() {
 
   processLazyProperties();
 
-  // The windowing system will let this busy-loop in some situations, unfortunately. Make sure that doesn't happen.
-  if (options::maxFPS != -1) {
-    auto currTime = std::chrono::steady_clock::now();
-    long microsecPerLoop = 1000000 / options::maxFPS;
-    microsecPerLoop = (95 * microsecPerLoop) / 100; // give a little slack so we actually hit target fps
-    while (std::chrono::duration_cast<std::chrono::microseconds>(currTime - lastMainLoopIterTime).count() <
-           microsecPerLoop) {
-      std::this_thread::yield();
-      currTime = std::chrono::steady_clock::now();
-    }
-  }
-  lastMainLoopIterTime = std::chrono::steady_clock::now();
-
   render::engine->makeContextCurrent();
   render::engine->updateWindowSize();
 
@@ -757,8 +786,7 @@ void mainLoopIteration() {
 void show(size_t forFrames) {
 
   if (!state::initialized) {
-    throw std::logic_error(options::printPrefix +
-                           "must initialize Polyscope with polyscope::init() before calling polyscope::show().");
+    exception("must initialize Polyscope with polyscope::init() before calling polyscope::show().");
   }
 
   // the popContext() doesn't quit until _after_ the last frame, so we need to decrement by 1 to get the count right
@@ -802,7 +830,7 @@ bool registerGroup(std::string name) {
   // check if group already exists
   bool inUse = state::groups.find(name) != state::groups.end();
   if (inUse) {
-    polyscope::error("Attempted to register group with name " + name + ", but a group with that name already exists");
+    exception("Attempted to register group with name " + name + ", but a group with that name already exists");
     return false;
   }
 
@@ -818,15 +846,14 @@ bool setParentGroupOfGroup(std::string child, std::string parent) {
   // check if child exists
   bool childExists = state::groups.find(child) != state::groups.end();
   if (!childExists) {
-    polyscope::error("Attempted to set parent of group " + child + ", but no group with that name exists");
+    exception("Attempted to set parent of group " + child + ", but no group with that name exists");
     return false;
   }
 
   // check if parent exists
   bool parentExists = state::groups.find(parent) != state::groups.end();
   if (!parentExists) {
-    polyscope::error("Attempted to set parent of group " + child + " to " + parent +
-                     ", but no group with that name exists");
+    exception("Attempted to set parent of group " + child + " to " + parent + ", but no group with that name exists");
     return false;
   }
 
@@ -839,8 +866,8 @@ bool setParentGroupOfStructure(std::string typeName, std::string child, std::str
   // check if parent exists
   bool parentExists = state::groups.find(parent) != state::groups.end();
   if (!parentExists) {
-    polyscope::error("Attempted to set parent of " + typeName + " " + child + " to " + parent +
-                     ", but no group with that name exists");
+    exception("Attempted to set parent of " + typeName + " " + child + " to " + parent +
+              ", but no group with that name exists");
     return false;
   }
 
@@ -853,8 +880,8 @@ bool setParentGroupOfStructure(std::string typeName, std::string child, std::str
   // check if child exists
   bool childExists = sMap.find(child) != sMap.end();
   if (!childExists) {
-    polyscope::error("Attempted to set parent of " + typeName + " " + child + ", but no " + typeName +
-                     "with that name exists");
+    exception("Attempted to set parent of " + typeName + " " + child + ", but no " + typeName +
+              "with that name exists");
     return false;
   }
 
@@ -882,8 +909,8 @@ bool registerStructure(Structure* s, bool replaceIfPresent) {
     if (replaceIfPresent) {
       removeStructure(s->name);
     } else {
-      polyscope::error("Attempted to register structure with name " + s->name +
-                       ", but a structure with that name already exists");
+      exception("Attempted to register structure with name " + s->name +
+                ", but a structure with that name already exists");
       return false;
     }
   }
@@ -910,7 +937,7 @@ Structure* getStructure(std::string type, std::string name) {
 
   // If there are no structures of that type it is an automatic fail
   if (state::structures.find(type) == state::structures.end()) {
-    error("No structures of type " + type + " registered");
+    exception("No structures of type " + type + " registered");
     return nullptr;
   }
   std::map<std::string, Structure*>& sMap = state::structures[type];
@@ -918,8 +945,8 @@ Structure* getStructure(std::string type, std::string name) {
   // Special automatic case, return any
   if (name == "") {
     if (sMap.size() != 1) {
-      error("Cannot use automatic structure get with empty name unless there is exactly one structure of that type "
-            "registered");
+      exception("Cannot use automatic structure get with empty name unless there is exactly one structure of that type "
+                "registered");
       return nullptr;
     }
     return sMap.begin()->second;
@@ -927,7 +954,7 @@ Structure* getStructure(std::string type, std::string name) {
 
   // General case
   if (sMap.find(name) == sMap.end()) {
-    error("No structure of type " + type + " with name " + name + " registered");
+    exception("No structure of type " + type + " with name " + name + " registered");
     return nullptr;
   }
   return sMap[name];
@@ -943,8 +970,8 @@ bool hasStructure(std::string type, std::string name) {
   // Special automatic case, return any
   if (name == "") {
     if (sMap.size() != 1) {
-      error("Cannot use automatic structure get with empty name unless there is exactly one structure of that type "
-            "registered");
+      exception("Cannot use automatic structure get with empty name unless there is exactly one structure of that type "
+                "registered");
     }
     return true;
   }
@@ -954,7 +981,7 @@ bool hasStructure(std::string type, std::string name) {
 void setGroupEnabled(std::string name, bool enabled) {
   // Check if group exists
   if (state::groups.find(name) == state::groups.end()) {
-    error("No group with name " + name + " registered");
+    exception("No group with name " + name + " registered");
     return;
   }
 
@@ -967,7 +994,7 @@ void removeGroup(std::string name, bool errorIfAbsent) {
   // Check if group exists
   if (state::groups.find(name) == state::groups.end()) {
     if (errorIfAbsent) {
-      error("No group with name " + name + " registered");
+      exception("No group with name " + name + " registered");
     }
     return;
   }
@@ -991,7 +1018,7 @@ void removeStructure(std::string type, std::string name, bool errorIfAbsent) {
   // If there are no structures of that type it is an automatic fail
   if (state::structures.find(type) == state::structures.end()) {
     if (errorIfAbsent) {
-      error("No structures of type " + type + " registered");
+      exception("No structures of type " + type + " registered");
     }
     return;
   }
@@ -1000,13 +1027,16 @@ void removeStructure(std::string type, std::string name, bool errorIfAbsent) {
   // Check if structure exists
   if (sMap.find(name) == sMap.end()) {
     if (errorIfAbsent) {
-      error("No structure of type " + type + " and name " + name + " registered");
+      exception("No structure of type " + type + " and name " + name + " registered");
     }
     return;
   }
 
   // Structure exists, remove it
   Structure* s = sMap[name];
+  if (static_cast<void*>(s) == static_cast<void*>(internal::globalFloatingQuantityStructure)) {
+    internal::globalFloatingQuantityStructure = nullptr;
+  }
   // remove it from all existing groups
   for (auto& g : state::groups) {
     g.second->removeChildStructure(s);
@@ -1034,9 +1064,10 @@ void removeStructure(std::string name, bool errorIfAbsent) {
         if (targetStruct == nullptr) {
           targetStruct = entry.second;
         } else {
-          error("Cannot use automatic structure remove with empty name unless there is exactly one structure of that "
-                "type registered. Found two structures of different types with that name: " +
-                targetStruct->typeName() + " and " + typeMap.first + ".");
+          exception(
+              "Cannot use automatic structure remove with empty name unless there is exactly one structure of that "
+              "type registered. Found two structures of different types with that name: " +
+              targetStruct->typeName() + " and " + typeMap.first + ".");
           return;
         }
       }
@@ -1046,7 +1077,7 @@ void removeStructure(std::string name, bool errorIfAbsent) {
   // Error if none found.
   if (targetStruct == nullptr) {
     if (errorIfAbsent) {
-      error("No structure named: " + name + " to remove.");
+      exception("No structure named: " + name + " to remove.");
     }
     return;
   }
@@ -1174,6 +1205,9 @@ void updateStructureExtents() {
 
   for (auto cat : state::structures) {
     for (auto x : cat.second) {
+      if (!x.second->hasExtents()) {
+        continue;
+      }
       state::lengthScale = std::max(state::lengthScale, x.second->lengthScale());
       auto bbox = x.second->boundingBox();
       minBbox = componentwiseMin(minBbox, std::get<0>(bbox));

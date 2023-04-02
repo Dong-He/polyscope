@@ -1,4 +1,5 @@
-// Copyright 2017-2019, Nicholas Sharp and the Polyscope contributors. http://polyscope.run.
+// Copyright 2017-2023, Nicholas Sharp and the Polyscope contributors. https://polyscope.run
+
 #include "polyscope/render/color_maps.h"
 
 #include "polyscope/render/colormap_defs.h"
@@ -16,7 +17,7 @@ namespace render {
 bool buildColormapSelector(std::string& cm, std::string fieldName) {
   bool changed = false;
 
-  ImGui::PushItemWidth(100);
+  ImGui::PushItemWidth(125);
 
   if (ImGui::BeginCombo(fieldName.c_str(), cm.c_str())) {
     for (auto& c : render::engine->colorMaps) {

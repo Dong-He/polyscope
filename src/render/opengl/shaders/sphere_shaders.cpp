@@ -1,3 +1,5 @@
+// Copyright 2017-2023, Nicholas Sharp and the Polyscope contributors. https://polyscope.run
+
 #include "polyscope/render/opengl/shaders/sphere_shaders.h"
 
 
@@ -13,12 +15,12 @@ const ShaderStageSpecification FLEX_SPHERE_VERT_SHADER = {
 
     // uniforms
     {
-        {"u_modelView", DataType::Matrix44Float},
+        {"u_modelView", RenderDataType::Matrix44Float},
     }, 
 
     // attributes
     {
-        {"a_position", DataType::Vector3Float},
+        {"a_position", RenderDataType::Vector3Float},
     },
 
     {}, // textures
@@ -47,8 +49,8 @@ const ShaderStageSpecification FLEX_SPHERE_GEOM_SHADER = {
     
     // uniforms
     {
-        {"u_projMatrix", DataType::Matrix44Float},
-        {"u_pointRadius", DataType::Float},
+        {"u_projMatrix", RenderDataType::Matrix44Float},
+        {"u_pointRadius", RenderDataType::Float},
     }, 
 
     // attributes
@@ -115,10 +117,10 @@ const ShaderStageSpecification FLEX_SPHERE_FRAG_SHADER = {
     
     // uniforms
     {
-        {"u_projMatrix", DataType::Matrix44Float},
-        {"u_invProjMatrix", DataType::Matrix44Float},
-        {"u_viewport", DataType::Vector4Float},
-        {"u_pointRadius", DataType::Float},
+        {"u_projMatrix", RenderDataType::Matrix44Float},
+        {"u_invProjMatrix", RenderDataType::Matrix44Float},
+        {"u_viewport", RenderDataType::Vector4Float},
+        {"u_pointRadius", RenderDataType::Float},
     }, 
 
     { }, // attributes
@@ -198,12 +200,12 @@ const ShaderStageSpecification FLEX_POINTQUAD_VERT_SHADER = {
 
     // uniforms
     {
-        {"u_modelView", DataType::Matrix44Float},
+        {"u_modelView", RenderDataType::Matrix44Float},
     }, 
 
     // attributes
     {
-        {"a_position", DataType::Vector3Float},
+        {"a_position", RenderDataType::Vector3Float},
     },
 
     {}, // textures
@@ -232,8 +234,8 @@ const ShaderStageSpecification FLEX_POINTQUAD_GEOM_SHADER = {
     
     // uniforms
     {
-        {"u_projMatrix", DataType::Matrix44Float},
-        {"u_pointRadius", DataType::Float},
+        {"u_projMatrix", RenderDataType::Matrix44Float},
+        {"u_pointRadius", RenderDataType::Float},
     }, 
 
     // attributes
@@ -296,8 +298,8 @@ const ShaderStageSpecification FLEX_POINTQUAD_FRAG_SHADER = {
     
     // uniforms
     {
-        {"u_projMatrix", DataType::Matrix44Float},
-        {"u_pointRadius", DataType::Float},
+        {"u_projMatrix", RenderDataType::Matrix44Float},
+        {"u_pointRadius", RenderDataType::Float},
     }, 
 
     { }, // attributes
@@ -377,7 +379,7 @@ const ShaderReplacementRule SPHERE_PROPAGATE_VALUE (
     },
     /* uniforms */ {},
     /* attributes */ {
-      {"a_value", DataType::Float},
+      {"a_value", RenderDataType::Float},
     },
     /* textures */ {}
 );
@@ -408,7 +410,7 @@ const ShaderReplacementRule SPHERE_PROPAGATE_VALUE2 (
     },
     /* uniforms */ {},
     /* attributes */ {
-      {"a_value2", DataType::Vector2Float},
+      {"a_value2", RenderDataType::Vector2Float},
     },
     /* textures */ {}
 );
@@ -439,7 +441,7 @@ const ShaderReplacementRule SPHERE_PROPAGATE_COLOR (
     },
     /* uniforms */ {},
     /* attributes */ {
-      {"a_color", DataType::Vector3Float},
+      {"a_color", RenderDataType::Vector3Float},
     },
     /* textures */ {}
 );
@@ -511,7 +513,7 @@ const ShaderReplacementRule SPHERE_VARIABLE_SIZE (
     },
     /* uniforms */ {},
     /* attributes */ {
-      {"a_pointRadius", DataType::Float},
+      {"a_pointRadius", RenderDataType::Float},
     },
     /* textures */ {}
 );

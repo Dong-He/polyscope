@@ -1,4 +1,5 @@
-// Copyright 2017-2019, Nicholas Sharp and the Polyscope contributors. http://polyscope.run.
+// Copyright 2017-2023, Nicholas Sharp and the Polyscope contributors. https://polyscope.run
+
 #include "polyscope/group.h"
 #include "imgui.h"
 #include "polyscope/polyscope.h"
@@ -89,9 +90,8 @@ void Group::unparent() {
 void Group::addChildGroup(Group* newChild) {
   // TODO: Daniel - check for cycles
   if (getTopLevelGrandparent() == newChild) {
-    polyscope::error("Attempted to make group " + newChild->name + " a child of " + name +
-                     ", but this would create a cycle (group " + name + " is already a descendant of " +
-                     newChild->name + ")");
+    exception("Attempted to make group " + newChild->name + " a child of " + name +
+              ", but this would create a cycle (group " + name + " is already a descendant of " + newChild->name + ")");
     return;
   }
   // if child is already in a group, remove it from that group
@@ -154,7 +154,7 @@ int Group::isEnabled() {
       any_children_disabled = true;
     } else if (child->isEnabled() == -2) {
     } else { // huh?
-      polyscope::error("Unexpected return value from Group::isEnabled()");
+      exception("Unexpected return value from Group::isEnabled()");
     }
   }
 

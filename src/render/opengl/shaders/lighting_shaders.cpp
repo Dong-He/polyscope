@@ -1,4 +1,5 @@
-// Copyright 2017-2019, Nicholas Sharp and the Polyscope contributors. http://polyscope.run.
+// Copyright 2017-2023, Nicholas Sharp and the Polyscope contributors. https://polyscope.run
+
 
 #include "polyscope/render/opengl/shaders/lighting_shaders.h"
 #include "polyscope/render/opengl/shaders/texture_draw_shaders.h"
@@ -16,10 +17,10 @@ const ShaderStageSpecification MAP_LIGHT_FRAG_SHADER = {
     
     // uniforms
     { 
-        {"u_exposure", DataType::Float},
-        {"u_gamma", DataType::Float},
-        {"u_whiteLevel", DataType::Float},
-        {"u_texelSize", DataType::Vector2Float},
+        {"u_exposure", RenderDataType::Float},
+        {"u_gamma", RenderDataType::Float},
+        {"u_whiteLevel", RenderDataType::Float},
+        {"u_texelSize", RenderDataType::Vector2Float},
     }, 
 
     // attributes
@@ -184,7 +185,7 @@ const ShaderReplacementRule TRANSPARENCY_STRUCTURE (
         )"},
     },
     /* uniforms */ {
-        {"u_transparency", DataType::Float},
+        {"u_transparency", RenderDataType::Float},
     },
     /* attributes */ {},
     /* textures */ {}
@@ -212,8 +213,8 @@ const ShaderReplacementRule TRANSPARENCY_PEEL_STRUCTURE (
         )"},
     },
     /* uniforms */ {
-        {"u_transparency", DataType::Float},
-        {"u_viewportDim", DataType::Vector2Float},
+        {"u_transparency", RenderDataType::Float},
+        {"u_viewportDim", RenderDataType::Vector2Float},
     },
     /* attributes */ {},
     /* textures */ {

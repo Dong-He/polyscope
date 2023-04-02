@@ -1,3 +1,5 @@
+// Copyright 2017-2023, Nicholas Sharp and the Polyscope contributors. https://polyscope.run
+
 #include "polyscope/transformation_gizmo.h"
 
 #include "polyscope/polyscope.h"
@@ -311,7 +313,6 @@ bool TransformationGizmo::interact() {
     // clear selection before proceeding
     selectedType = TransformHandle::None;
     selectedDim = -1;
-    bool dragStarted = false;
 
     if (hitType == TransformHandle::Rotation && hitDist < diskWidth) {
       // rotation is hovered
@@ -323,7 +324,6 @@ bool TransformationGizmo::interact() {
       // if the mouse is clicked, start a drag
       if (ImGui::IsMouseClicked(0) && !io.WantCaptureMouse) {
         currentlyDragging = true;
-        dragStarted = true;
 
         glm::vec3 nearestDir = glm::normalize(hitNearest - center);
         dragPrevVec = nearestDir;
@@ -338,7 +338,6 @@ bool TransformationGizmo::interact() {
       // if the mouse is clicked, start a drag
       if (ImGui::IsMouseClicked(0) && !io.WantCaptureMouse) {
         currentlyDragging = true;
-        dragStarted = true;
 
         dragPrevVec = hitNearest;
       }
@@ -352,7 +351,6 @@ bool TransformationGizmo::interact() {
       // if the mouse is clicked, start a drag
       if (ImGui::IsMouseClicked(0) && !io.WantCaptureMouse) {
         currentlyDragging = true;
-        dragStarted = true;
 
         dragPrevVec = hitNearest;
       }

@@ -1,4 +1,5 @@
-// Copyright 2017-2019, Nicholas Sharp and the Polyscope contributors. http://polyscope.run.
+// Copyright 2017-2023, Nicholas Sharp and the Polyscope contributors. https://polyscope.run
+
 #pragma once
 
 #include <array>
@@ -6,7 +7,7 @@
 
 #include "polyscope/camera_parameters.h"
 #include "polyscope/types.h"
-//#include "polyscope/gl/gl_utils.h"
+// #include "polyscope/gl/gl_utils.h"
 
 // GLM for view matrices
 #include "glm/gtc/constants.hpp"
@@ -38,6 +39,7 @@ extern int initWindowPosX;
 extern int initWindowPosY;
 extern NavigateStyle style;
 extern UpDir upDir;
+extern FrontDir frontDir;
 extern double moveScale;
 extern double nearClipRatio;
 extern double farClipRatio;
@@ -71,6 +73,7 @@ void processZoom(double amount);
 
 void setWindowSize(int width, int height);
 void setViewToCamera(const CameraParameters& p);
+CameraParameters getCameraParametersForCurrentView();
 
 // Invalidating the view:
 // The view is invalid if the viewMat has NaN entries.
@@ -80,7 +83,7 @@ void setViewToCamera(const CameraParameters& p);
 void invalidateView();
 void ensureViewValid();
 
-// The "home" view looks at the center of the scenes bounding box.
+// The "home" view looks at the center of the scene's bounding box.
 glm::mat4 computeHomeView();
 void resetCameraToHomeView();
 void flyToHomeView();
@@ -89,12 +92,17 @@ void flyToHomeView();
 void lookAt(glm::vec3 cameraLocation, glm::vec3 target, bool flyTo = false);
 void lookAt(glm::vec3 cameraLocation, glm::vec3 target, glm::vec3 upDir, bool flyTo = false);
 
-// Get various camera matrices and data
+// Get various camera matrices and data for the current view
 glm::mat4 getCameraViewMatrix();
+void setCameraViewMatrix(glm::mat4 newMat);
 glm::mat4 getCameraPerspectiveMatrix();
 glm::vec3 getCameraWorldPosition();
 void getCameraFrame(glm::vec3& lookDir, glm::vec3& upDir, glm::vec3& rightDir);
+
+// Get world geometry corresponding to a screen pixel (e.g. from a mouse click)
 glm::vec3 screenCoordsToWorldRay(glm::vec2 screenCoords);
+glm::vec3 bufferCoordsToWorldRay(glm::vec2 screenCoords);
+glm::vec3 screenCoordsToWorldPosition(glm::vec2 screenCoords); // queries the depth buffer to get full position
 
 // Flight-related
 void startFlightTo(const CameraParameters& p, float flightLengthInSeconds = .4);
@@ -111,10 +119,15 @@ void updateFlight(); // Note: uses wall-clock time, so should generally be calle
                      // iteration
 
 
-// Setters, getters, etc
+// == Setters, getters, etc
+
 void setUpDir(UpDir newUpDir, bool animateFlight = false);
 UpDir getUpDir();
 glm::vec3 getUpVec();
+
+void setFrontDir(FrontDir newFrontDir, bool animateFlight = false);
+FrontDir getFrontDir();
+glm::vec3 getFrontVec();
 
 } // namespace view
 } // namespace polyscope
