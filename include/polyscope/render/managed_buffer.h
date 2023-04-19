@@ -30,7 +30,7 @@ class ManagedBuffer {
 public:
   // === Constructors
 
-  // Manage a buffer of data which has been explicitly set externally
+  // Manage a buffer of data which is explicitly set externally.
   ManagedBuffer(const std::string& name, std::vector<T>& data);
 
   // Manage a buffer of data which gets computed lazily
@@ -70,6 +70,9 @@ public:
   // updated directly from GPU memory, this will mirror the updates to the cpu-side vector. Also, if the value is lazily
   // computed by computeFunc(), it ensures that that function has been called.
   void ensureHostBufferPopulated();
+
+  // Combines calling ensureHostBufferPopulated() and returning a reference to the `data` member
+  std::vector<T>& getPopulatedHostBufferRef();
 
   // If the contents of `data` are updated, this function MUST be called. It internally handles concerns like reflecting
   // updates to the render buffer.

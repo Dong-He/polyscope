@@ -20,6 +20,7 @@
 #include "polyscope/surface_parameterization_quantity.h"
 #include "polyscope/surface_scalar_quantity.h"
 #include "polyscope/surface_vector_quantity.h"
+#include "polyscope/utilities.h"
 
 namespace polyscope {
 
@@ -93,9 +94,10 @@ public:
   render::ManagedBuffer<glm::vec3> vertexPositions;
 
   // connectivity / indices
-  render::ManagedBuffer<uint32_t> triangleVertexInds;      // on triangulated mesh [3 * nTriFace]
-  render::ManagedBuffer<uint32_t> triangleFaceInds;        // on triangulated mesh [3 * nTriFace]
-  render::ManagedBuffer<uint32_t> triangleCornerInds;      // on triangulated mesh [3 * nTriFace]
+  render::ManagedBuffer<uint32_t> triangleVertexInds; // on triangulated mesh [3 * nTriFace]
+  render::ManagedBuffer<uint32_t> triangleFaceInds;   // on triangulated mesh [3 * nTriFace]
+  render::ManagedBuffer<uint32_t> triangleCornerInds; // on triangulated mesh [3 * nTriFace]
+  // these next 3 use the ***perm if it has been set
   render::ManagedBuffer<uint32_t> triangleAllEdgeInds;     // on triangulated mesh, all 3 [3 * 3 * nTriFace]
   render::ManagedBuffer<uint32_t> triangleAllHalfedgeInds; // on triangulated mesh, all 3 [3 * 3 * nTriFace]
   render::ManagedBuffer<uint32_t> triangleAllCornerInds;   // on triangulated mesh, all 3 [3 * 3 * nTriFace]
@@ -113,9 +115,8 @@ public:
   // render::ManagedBuffer<double> edgeLengths;
 
   // tangent spaces
-  render::ManagedBuffer<std::array<glm::vec3, 2>> faceTangentSpaces;        // set by user
-  render::ManagedBuffer<std::array<glm::vec3, 2>> vertexTangentSpaces;      // set by user
-  render::ManagedBuffer<std::array<glm::vec3, 2>> defaultFaceTangentSpaces; // automatically computed, used internally
+  render::ManagedBuffer<glm::vec3> defaultFaceTangentBasisX;
+  render::ManagedBuffer<glm::vec3> defaultFaceTangentBasisY;
 
 
   // === Quantity-related
@@ -146,8 +147,8 @@ public:
 	template <class T> SurfaceVertexVectorQuantity* addVertexVectorQuantity2D(std::string name, const T& vectors, VectorType vectorType = VectorType::STANDARD); 
 	template <class T> SurfaceFaceVectorQuantity* addFaceVectorQuantity(std::string name, const T& vectors, VectorType vectorType = VectorType::STANDARD); 
 	template <class T> SurfaceFaceVectorQuantity* addFaceVectorQuantity2D(std::string name, const T& vectors, VectorType vectorType = VectorType::STANDARD); 
-  template <class T> SurfaceFaceTangentVectorQuantity* addFaceTangentVectorQuantity(std::string name, const T& vectors, int nSym = 1, VectorType vectorType = VectorType::STANDARD); 
-	template <class T> SurfaceVertexTangentVectorQuantity* addVertexTangentVectorQuantity(std::string name, const T& vectors, int nSym = 1, VectorType vectorType = VectorType::STANDARD);
+  template <class T, class BX, class BY> SurfaceFaceTangentVectorQuantity* addFaceTangentVectorQuantity(std::string name, const T& vectors, const BX& basisX, const BY& basisY, int nSym = 1, VectorType vectorType = VectorType::STANDARD); 
+	template <class T, class BX, class BY> SurfaceVertexTangentVectorQuantity* addVertexTangentVectorQuantity(std::string name, const T& vectors, const BX& basisX, const BY& basisY, int nSym = 1, VectorType vectorType = VectorType::STANDARD);
 	template <class T, class O> SurfaceOneFormTangentVectorQuantity* addOneFormTangentVectorQuantity(std::string name, const T& data, const O& orientations);
 
 
@@ -171,6 +172,7 @@ public:
   // Permutation arrays. Empty == default ordering
   std::vector<size_t> edgePerm;
   std::vector<size_t> halfedgePerm;
+  std::vector<size_t> cornerPerm;
 
   // Set permutations
   template <class T>
@@ -178,7 +180,9 @@ public:
   template <class T>
   void setHalfedgePermutation(const T& perm, size_t expectedSize = 0);
   template <class T>
-  void setAllPermutations(const std::array<std::pair<T, size_t>, 2>& perms);
+  void setCornerPermutation(const T& perm, size_t expectedSize = 0);
+  template <class T>
+  void setAllPermutations(const std::array<std::pair<T, size_t>, 3>& perms);
 
   template <class T> // deprecated, for backward compatability only
   void setAllPermutations(const std::array<std::pair<T, size_t>, 5>& perms);
@@ -202,8 +206,8 @@ public:
   size_t nFacesTriangulationCount = 0;
   size_t nFacesTriangulation() const { return nFacesTriangulationCount; }
 
-  size_t nEdgesCount = 0;                       // populating this is expensive...
-  size_t nEdges() const { return nEdgesCount; } // WARNING: returns 0 until something involving edges has been done
+  size_t nEdgesCount = INVALID_IND; // populating this is expensive...
+  size_t nEdges();                  // NOTE causes population of nEdgesCount
 
   size_t nCornersCount = 0; // = nHalfedges = sum face degree
   size_t nCorners() const { return nCornersCount; }
@@ -227,26 +231,7 @@ public:
   // (note that this may not match the halfedge perm that the user specifies)
   std::vector<size_t> twinHalfedge; // for halfedge i, the index of a twin halfedge
 
-  // == Manage tangent spaces
-
-  // check if the user has set tangent spaces, and print a helpful error if not
-  void checkHaveVertexTangentSpaces();
-  void checkHaveFaceTangentSpaces();
-
-  // Set tangent space coordinates for vertices
-  template <class T>
-  void setVertexTangentBasisX(const T& vectors);
-  template <class T>
-  void setVertexTangentBasisX2D(const T& vectors);
-
-  // Set tangent space coordinates for faces
-  template <class T>
-  void setFaceTangentBasisX(const T& vectors);
-  template <class T>
-  void setFaceTangentBasisX2D(const T& vectors);
-
   static const std::string structureTypeName;
-
 
   // === Getters and setters for visualization settings
 
@@ -329,9 +314,8 @@ private:
   // std::vector<double> edgeLengthsData;
 
   // tangent spaces
-  std::vector<std::array<glm::vec3, 2>> faceTangentSpacesData;
-  std::vector<std::array<glm::vec3, 2>> vertexTangentSpacesData;
-  std::vector<std::array<glm::vec3, 2>> defaultFaceTangentSpacesData;
+  std::vector<glm::vec3> defaultFaceTangentBasisXData;
+  std::vector<glm::vec3> defaultFaceTangentBasisYData;
 
 
   // Derived connectivity quantities
@@ -367,7 +351,9 @@ private:
   void computeVertexNormals();
   void computeVertexAreas();
   void computeEdgeLengths();
-  void computeDefaultFaceTangentSpaces();
+  void computeDefaultFaceTangentBasisX();
+  void computeDefaultFaceTangentBasisY();
+  void countEdges();
 
   // Picking-related
   // Order of indexing: vertexPositions, faces, edges, halfedges
@@ -412,14 +398,12 @@ private:
   SurfaceVertexParameterizationQuantity* addLocalParameterizationQuantityImpl(std::string name, const std::vector<glm::vec2>& coords, ParamCoordsType type);
   SurfaceVertexVectorQuantity* addVertexVectorQuantityImpl(std::string name, const std::vector<glm::vec3>& vectors, VectorType vectorType);
   SurfaceFaceVectorQuantity* addFaceVectorQuantityImpl(std::string name, const std::vector<glm::vec3>& vectors, VectorType vectorType);
-  SurfaceFaceTangentVectorQuantity* addFaceTangentVectorQuantityImpl(std::string name, const std::vector<glm::vec2>& vectors, int nSym, VectorType vectorType);
-  SurfaceVertexTangentVectorQuantity* addVertexTangentVectorQuantityImpl(std::string name, const std::vector<glm::vec2>& vectors, int nSym, VectorType vectorType);
+  SurfaceFaceTangentVectorQuantity* addFaceTangentVectorQuantityImpl(std::string name, const std::vector<glm::vec2>& vectors, const std::vector<glm::vec3>& basisX, const std::vector<glm::vec3>& basisY, int nSym, VectorType vectorType);
+  SurfaceVertexTangentVectorQuantity* addVertexTangentVectorQuantityImpl(std::string name, const std::vector<glm::vec2>& vectors, const std::vector<glm::vec3>& basisX, const std::vector<glm::vec3>& basisY, int nSym, VectorType vectorType);
   SurfaceOneFormTangentVectorQuantity* addOneFormTangentVectorQuantityImpl(std::string name, const std::vector<double>& data, const std::vector<char>& orientations);
 
   // === Helper implementations
 
-  void setVertexTangentBasisXImpl(const std::vector<glm::vec3>& vectors);
-  void setFaceTangentBasisXImpl(const std::vector<glm::vec3>& vectors);
   // clang-format on
 };
 

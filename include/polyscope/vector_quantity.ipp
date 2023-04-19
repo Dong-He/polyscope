@@ -1,6 +1,5 @@
 // Copyright 2017-2023, Nicholas Sharp and the Polyscope contributors. https://polyscope.run
 
-#include "polyscope/vector_quantity.h"
 
 #include "polyscope/standardize_data_array.h"
 
@@ -71,6 +70,18 @@ double VectorQuantityBase<QuantityT>::getVectorLengthScale() {
 }
 
 template <typename QuantityT>
+QuantityT* VectorQuantityBase<QuantityT>::setVectorLengthRange(double newLength) {
+  vectorLengthRange = newLength;
+  vectorLengthRangeManuallySet = true;
+  requestRedraw();
+  return &quantity;
+}
+template <typename QuantityT>
+double VectorQuantityBase<QuantityT>::getVectorLengthRange() {
+  return vectorLengthRange;
+}
+
+template <typename QuantityT>
 QuantityT* VectorQuantityBase<QuantityT>::setVectorRadius(double val, bool isRelative) {
   vectorRadius = ScaledValue<double>(val, isRelative);
   requestRedraw();
@@ -130,7 +141,8 @@ void VectorQuantity<QuantityT>::drawVectors() {
   if (this->vectorType == VectorType::AMBIENT) {
     this->vectorProgram->setUniform("u_lengthMult", 1.0);
   } else {
-    this->vectorProgram->setUniform("u_lengthMult", this->vectorLengthMult.get().asAbsolute() / this->maxLength);
+    this->vectorProgram->setUniform("u_lengthMult",
+                                    this->vectorLengthMult.get().asAbsolute() / this->vectorLengthRange);
   }
 
   glm::mat4 P = view::getCameraPerspectiveMatrix();
@@ -166,11 +178,14 @@ void VectorQuantity<QuantityT>::createProgram() {
 
 template <typename QuantityT>
 void VectorQuantity<QuantityT>::updateMaxLength() {
+  if (this->vectorLengthRangeManuallySet) return; // do nothing if it has already been set manually
+
   vectors.ensureHostBufferPopulated();
-  maxLength = 0.;
+  float maxLength = 0.;
   for (const glm::vec3& vec : vectors.data) {
     maxLength = std::max(maxLength, glm::length(vec));
   }
+  this->vectorLengthRange = maxLength;
 }
 
 template <typename QuantityT>
@@ -206,13 +221,17 @@ void VectorQuantity<QuantityT>::updateData2D(const T& newVectors) {
 template <typename QuantityT>
 TangentVectorQuantity<QuantityT>::TangentVectorQuantity(QuantityT& quantity_,
                                                         const std::vector<glm::vec2>& tangentVectors_,
-                                                        render::ManagedBuffer<glm::vec3>& vectorRoots_,
-                                                        render::ManagedBuffer<std::array<glm::vec3, 2>>& tangentBasis_,
-                                                        int nSym_, VectorType vectorType_)
+                                                        const std::vector<glm::vec3>& tangentBasisX_,
+                                                        const std::vector<glm::vec3>& tangentBasisY_,
+                                                        render::ManagedBuffer<glm::vec3>& vectorRoots_, int nSym_,
+                                                        VectorType vectorType_)
 
     : VectorQuantityBase<QuantityT>(quantity_, vectorType_),
-      tangentVectors(quantity_.uniquePrefix() + "#values", tangentVectorsData), vectorRoots(vectorRoots_),
-      tangentBasis(tangentBasis_), tangentVectorsData(tangentVectors_), nSym(nSym_) {
+      tangentVectors(quantity_.uniquePrefix() + "#values", tangentVectorsData),
+      tangentBasisX(quantity_.uniquePrefix() + "#basisX", tangentBasisXData),
+      tangentBasisY(quantity_.uniquePrefix() + "#basisY", tangentBasisYData), vectorRoots(vectorRoots_),
+      tangentVectorsData(tangentVectors_), tangentBasisXData(tangentBasisX_), tangentBasisYData(tangentBasisY_),
+      nSym(nSym_) {
   this->updateMaxLength();
 }
 
@@ -235,7 +254,8 @@ void TangentVectorQuantity<QuantityT>::drawVectors() {
     if (this->vectorType == VectorType::AMBIENT) {
       this->vectorProgram->setUniform("u_lengthMult", 1.0);
     } else {
-      this->vectorProgram->setUniform("u_lengthMult", this->vectorLengthMult.get().asAbsolute() / this->maxLength);
+      this->vectorProgram->setUniform("u_lengthMult",
+                                      this->vectorLengthMult.get().asAbsolute() / this->vectorLengthRange);
     }
 
     glm::mat4 P = view::getCameraPerspectiveMatrix();
@@ -264,7 +284,8 @@ void TangentVectorQuantity<QuantityT>::createProgram() {
   // clang-format on
 
   this->vectorProgram->setAttribute("a_tangentVector", tangentVectors.getRenderAttributeBuffer());
-  this->vectorProgram->setAttribute("a_basisVectors", tangentBasis.getRenderAttributeBuffer());
+  this->vectorProgram->setAttribute("a_basisVectorX", tangentBasisX.getRenderAttributeBuffer());
+  this->vectorProgram->setAttribute("a_basisVectorY", tangentBasisY.getRenderAttributeBuffer());
   this->vectorProgram->setAttribute("a_position", vectorRoots.getRenderAttributeBuffer());
 
   render::engine->setMaterial(*(this->vectorProgram), this->material.get());
@@ -272,11 +293,14 @@ void TangentVectorQuantity<QuantityT>::createProgram() {
 
 template <typename QuantityT>
 void TangentVectorQuantity<QuantityT>::updateMaxLength() {
+  if (this->vectorLengthRangeManuallySet) return; // do nothing if it has already been set manually
+
   tangentVectors.ensureHostBufferPopulated();
-  maxLength = 0.;
+  float maxLength = 0.;
   for (const glm::vec2& vec : tangentVectors.data) {
     maxLength = std::max(maxLength, glm::length(vec));
   }
+  this->vectorLengthRange = maxLength;
 }
 
 template <typename QuantityT>

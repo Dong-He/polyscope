@@ -67,7 +67,7 @@ void processRotate(glm::vec2 startP, glm::vec2 endP) {
   glm::vec3 frameLookDir, frameUpDir, frameRightDir;
   getCameraFrame(frameLookDir, frameUpDir, frameRightDir);
 
-  switch (style) {
+  switch (getNavigateStyle()) {
   case NavigateStyle::Turntable: {
 
     glm::vec2 dragDelta = endP - startP;
@@ -514,7 +514,7 @@ void updateFlight() {
   }
 }
 
-std::string getCameraJson() {
+std::string getViewAsJson() {
 
   // Get the view matrix (note weird glm indexing, glm is [col][row])
   glm::mat4 viewMat = getCameraViewMatrix();
@@ -539,8 +539,9 @@ std::string getCameraJson() {
   std::string outString = j.dump();
   return outString;
 }
+std::string getCameraJson() { return getViewAsJson(); }
 
-void setCameraFromJson(std::string jsonData, bool flyTo) {
+void setViewFromJson(std::string jsonData, bool flyTo) {
   // Values will go here
   glm::mat4 newViewMat;
   double newFov = -777;
@@ -614,6 +615,7 @@ void setCameraFromJson(std::string jsonData, bool flyTo) {
     requestRedraw();
   }
 }
+void setCameraFromJson(std::string jsonData, bool flyTo) { setViewFromJson(jsonData, flyTo); }
 
 void buildViewGui() {
 
@@ -645,17 +647,15 @@ void buildViewGui() {
     ImGui::PushItemWidth(120);
     if (ImGui::BeginCombo("##View Style", viewStyleName.c_str())) {
       if (ImGui::Selectable("Turntable", view::style == view::NavigateStyle::Turntable)) {
-        view::style = view::NavigateStyle::Turntable;
-        view::flyToHomeView();
+        setNavigateStyle(view::NavigateStyle::Turntable, true);
         ImGui::SetItemDefaultFocus();
       }
       if (ImGui::Selectable("Free", view::style == view::NavigateStyle::Free)) {
-        view::style = view::NavigateStyle::Free;
+        setNavigateStyle(view::NavigateStyle::Free, true);
         ImGui::SetItemDefaultFocus();
       }
       if (ImGui::Selectable("Planar", view::style == view::NavigateStyle::Planar)) {
-        view::style = view::NavigateStyle::Planar;
-        view::flyToHomeView();
+        setNavigateStyle(view::NavigateStyle::Planar, true);
         ImGui::SetItemDefaultFocus();
       }
       ImGui::EndCombo();
@@ -951,6 +951,7 @@ void setFrontDir(FrontDir newFrontDir, bool animateFlight) {
   } else {
     resetCameraToHomeView();
   }
+  requestRedraw();
 }
 
 FrontDir getFrontDir() { return frontDir; }
@@ -974,6 +975,18 @@ glm::vec3 getFrontVec() {
   // unused fallthrough
   return glm::vec3{0., 0., 0.};
 }
+
+
+void setNavigateStyle(NavigateStyle newNavigateStyle, bool animateFlight) {
+  style = newNavigateStyle;
+  if (animateFlight) {
+    flyToHomeView();
+  } else {
+    resetCameraToHomeView();
+  }
+}
+NavigateStyle getNavigateStyle() { return style; }
+
 
 } // namespace view
 } // namespace polyscope

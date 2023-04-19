@@ -51,9 +51,8 @@ vertexNormals(          uniquePrefix() + "vertexNormals",       vertexNormalsDat
 vertexAreas(            uniquePrefix() + "vertexAreas",         vertexAreasData,        std::bind(&SurfaceMesh::computeVertexAreas, this)),
 
 // tangent spaces
-faceTangentSpaces(          uniquePrefix() + "faceTangentSpaces",   faceTangentSpacesData),
-vertexTangentSpaces(        uniquePrefix() + "vertexTangentSpace",  vertexTangentSpacesData),
-defaultFaceTangentSpaces(   uniquePrefix() + "defaultFaceTangentSpace",  defaultFaceTangentSpacesData,  std::bind(&SurfaceMesh::computeDefaultFaceTangentSpaces, this)),
+defaultFaceTangentBasisX(   uniquePrefix() + "defaultFaceTangentBasisX",  defaultFaceTangentBasisXData,  std::bind(&SurfaceMesh::computeDefaultFaceTangentBasisX, this)),
+defaultFaceTangentBasisY(   uniquePrefix() + "defaultFaceTangentBasisY",  defaultFaceTangentBasisYData,  std::bind(&SurfaceMesh::computeDefaultFaceTangentBasisY, this)),
 
 // == persistent options
 surfaceColor(           uniquePrefix() + "surfaceColor",    getNextUniqueColor()),
@@ -185,6 +184,8 @@ void SurfaceMesh::computeConnectivityData() {
 
 void SurfaceMesh::computeTriangleAllEdgeInds() {
 
+  // WARNING: logic duplicated in countEdges()
+
   if (edgePerm.empty())
     exception("SurfaceMesh " + name +
               " performed an operation which requires edge indices to be specified, but none have been set. "
@@ -250,6 +251,51 @@ void SurfaceMesh::computeTriangleAllEdgeInds() {
 
   nEdgesCount = psEdgeInd;
   triangleAllEdgeInds.markHostBufferUpdated();
+}
+
+void SurfaceMesh::countEdges() {
+
+  // WARNING: logic duplicated in computeTriangleAllEdgeInds()
+
+  // used to loop over edges
+  std::unordered_map<std::pair<size_t, size_t>, size_t, polyscope::hash_combine::hash<std::pair<size_t, size_t>>>
+      seenEdgeInds;
+
+  auto createEdgeKey = [&](size_t a, size_t b) -> std::pair<size_t, size_t> {
+    return std::make_pair(std::min(a, b), std::max(a, b));
+  };
+
+  size_t psEdgeInd = 0; // polyscope's edge index, iterated according to Polyscope's canonical ordering
+  for (size_t iF = 0; iF < nFaces(); iF++) {
+    size_t start = faceIndsStart[iF];
+    size_t D = faceIndsStart[iF + 1] - start;
+
+    if (D != 3) {
+      exception("SurfaceMesh " + name +
+                " attempted to count edges, but mesh has non-triangular faces. Edge functions are only implemented on "
+                "a pure-triangular mesh.");
+    }
+
+    for (size_t j = 0; j < 3; j++) {
+      size_t vA = triangleVertexInds.data[3 * iF + j];
+      size_t vB = triangleVertexInds.data[3 * iF + ((j + 1) % 3)];
+
+      std::pair<size_t, size_t> key = createEdgeKey(vA, vB);
+
+      if (seenEdgeInds.find(key) == seenEdgeInds.end()) {
+        size_t thisEdgeInd = psEdgeInd;
+        seenEdgeInds[key] = thisEdgeInd;
+        psEdgeInd++;
+      }
+    }
+  }
+
+  nEdgesCount = psEdgeInd;
+}
+
+size_t SurfaceMesh::nEdges() {
+  if (nEdgesCount == INVALID_IND) countEdges();
+  return nEdgesCount;
 }
 
 void SurfaceMesh::computeTriangleCornerInds() {
@@ -322,6 +368,8 @@ void SurfaceMesh::computeTriangleAllCornerInds() {
   triangleAllCornerInds.data.clear();
   triangleAllCornerInds.data.reserve(3 * nFacesTriangulation());
 
+  bool haveCustomIndex = !cornerPerm.empty();
+
   for (size_t iF = 0; iF < nFaces(); iF++) {
     size_t iStart = faceIndsStart[iF];
     size_t D = faceIndsStart[iF + 1] - iStart;
@@ -331,6 +379,12 @@ void SurfaceMesh::computeTriangleAllCornerInds() {
       uint32_t c0 = iStart;
       uint32_t c1 = iStart + j;
       uint32_t c2 = iStart + j + 1;
+
+      if (haveCustomIndex) {
+        c0 = cornerPerm[c0];
+        c1 = cornerPerm[c1];
+        c2 = cornerPerm[c2];
+      }
 
       for (size_t k = 0; k < 3; k++) {
         triangleAllCornerInds.data.push_back(c0);
@@ -488,12 +542,15 @@ void SurfaceMesh::computeVertexAreas() {
   vertexAreas.markHostBufferUpdated();
 }
 
-void SurfaceMesh::computeDefaultFaceTangentSpaces() {
+void SurfaceMesh::computeDefaultFaceTangentBasisX() {
+
+  // NOTE: this function is weirdly duplicated into an 'X' and 'Y' paradigm to fit the compute-function-per-buffer
+  // paradigm
 
   vertexPositions.ensureHostBufferPopulated();
   faceNormals.ensureHostBufferPopulated();
 
-  defaultFaceTangentSpaces.data.resize(nFaces());
+  defaultFaceTangentBasisX.data.resize(nFaces());
 
   for (size_t iF = 0; iF < nFaces(); iF++) {
     size_t D = faceIndsStart[iF + 1] - faceIndsStart[iF];
@@ -510,11 +567,41 @@ void SurfaceMesh::computeDefaultFaceTangentSpaces() {
 
     glm::vec3 basisY = glm::normalize(-glm::cross(basisX, N));
 
-    defaultFaceTangentSpaces.data[iF][0] = basisX;
-    defaultFaceTangentSpaces.data[iF][1] = basisY;
+    defaultFaceTangentBasisX.data[iF] = basisX;
   }
 
-  defaultFaceTangentSpaces.markHostBufferUpdated();
+  defaultFaceTangentBasisX.markHostBufferUpdated();
+}
+
+void SurfaceMesh::computeDefaultFaceTangentBasisY() {
+
+  // NOTE: this function is weirdly duplicated into an 'X' and 'Y' paradigm to fit the compute-function-per-buffer
+  // paradigm
+
+  vertexPositions.ensureHostBufferPopulated();
+  faceNormals.ensureHostBufferPopulated();
+
+  defaultFaceTangentBasisY.data.resize(nFaces());
+
+  for (size_t iF = 0; iF < nFaces(); iF++) {
+    size_t D = faceIndsStart[iF + 1] - faceIndsStart[iF];
+    if (D != 3) exception("Default face tangent spaces only available for pure-triangular meshes");
+
+    size_t start = faceIndsStart[iF];
+
+    glm::vec3 pA = vertexPositions.data[faceIndsEntries[start + 0]];
+    glm::vec3 pB = vertexPositions.data[faceIndsEntries[start + 1]];
+    glm::vec3 N = faceNormals.data[iF];
+
+    glm::vec3 basisX = pB - pA;
+    basisX = glm::normalize(basisX - N * glm::dot(N, basisX));
+
+    glm::vec3 basisY = glm::normalize(-glm::cross(basisX, N));
+
+    defaultFaceTangentBasisY.data[iF] = basisY;
+  }
+
+  defaultFaceTangentBasisY.markHostBufferUpdated();
 }
 
 // === Edge Lengths ===
@@ -540,17 +627,6 @@ void SurfaceMesh::computeDefaultFaceTangentSpaces() {
 //
 //   edgeLengths.markHostBufferUpdated();
 // }
-
-void SurfaceMesh::checkHaveVertexTangentSpaces() {
-  if (vertexTangentSpaces.hasData()) return;
-  exception("Operation requires vertex tangent spaces for SurfaceMesh " + name +
-            ", but no tangent spaces have been set. Set them with setVertexTangentBasisX() to continue.");
-}
-void SurfaceMesh::checkHaveFaceTangentSpaces() {
-  if (faceTangentSpaces.hasData()) return;
-  exception("Operation requires face tangent spaces for SurfaceMesh " + name +
-            ", but no tangent spaces have been set. Set them with setFaceTangentBasisX() to continue.");
-}
 
 void SurfaceMesh::checkTriangular() {
   if (nFacesTriangulation() != nFaces()) {
@@ -819,7 +895,10 @@ void SurfaceMesh::setMeshPickAttributes(render::ShaderProgram& p) {
       }
 
       // Second half does halfedges/edges/corners, not used for simple mode
-      if (simplePick) continue;
+      if (simplePick) {
+        iFTri++;
+        continue;
+      }
 
 
       // Fill the halfedge buffer with edge or halfedge data, depending on which are in use
@@ -1485,7 +1564,7 @@ SurfaceFaceScalarQuantity* SurfaceMesh::addFaceScalarQuantityImpl(std::string na
 
 SurfaceEdgeScalarQuantity* SurfaceMesh::addEdgeScalarQuantityImpl(std::string name, const std::vector<double>& data,
                                                                   DataType type) {
-  SurfaceEdgeScalarQuantity* q = new SurfaceEdgeScalarQuantity(name, applyPermutation(data, edgePerm), *this, type);
+  SurfaceEdgeScalarQuantity* q = new SurfaceEdgeScalarQuantity(name, data, *this, type);
   addQuantity(q);
   markEdgesAsUsed();
   return q;
@@ -1493,8 +1572,7 @@ SurfaceEdgeScalarQuantity* SurfaceMesh::addEdgeScalarQuantityImpl(std::string na
 
 SurfaceHalfedgeScalarQuantity*
 SurfaceMesh::addHalfedgeScalarQuantityImpl(std::string name, const std::vector<double>& data, DataType type) {
-  SurfaceHalfedgeScalarQuantity* q =
-      new SurfaceHalfedgeScalarQuantity(name, applyPermutation(data, halfedgePerm), *this, type);
+  SurfaceHalfedgeScalarQuantity* q = new SurfaceHalfedgeScalarQuantity(name, data, *this, type);
   addQuantity(q);
   markHalfedgesAsUsed();
   return q;
@@ -1526,19 +1604,23 @@ SurfaceMesh::addFaceVectorQuantityImpl(std::string name, const std::vector<glm::
 
 SurfaceFaceTangentVectorQuantity* SurfaceMesh::addFaceTangentVectorQuantityImpl(std::string name,
                                                                                 const std::vector<glm::vec2>& vectors,
+                                                                                const std::vector<glm::vec3>& basisX,
+                                                                                const std::vector<glm::vec3>& basisY,
                                                                                 int nSym, VectorType vectorType) {
 
-  SurfaceFaceTangentVectorQuantity* q = new SurfaceFaceTangentVectorQuantity(name, vectors, *this, nSym, vectorType);
+  SurfaceFaceTangentVectorQuantity* q =
+      new SurfaceFaceTangentVectorQuantity(name, vectors, basisX, basisY, *this, nSym, vectorType);
   addQuantity(q);
   return q;
 }
 
 
 SurfaceVertexTangentVectorQuantity*
-SurfaceMesh::addVertexTangentVectorQuantityImpl(std::string name, const std::vector<glm::vec2>& vectors, int nSym,
-                                                VectorType vectorType) {
+SurfaceMesh::addVertexTangentVectorQuantityImpl(std::string name, const std::vector<glm::vec2>& vectors,
+                                                const std::vector<glm::vec3>& basisX,
+                                                const std::vector<glm::vec3>& basisY, int nSym, VectorType vectorType) {
   SurfaceVertexTangentVectorQuantity* q =
-      new SurfaceVertexTangentVectorQuantity(name, vectors, *this, nSym, vectorType);
+      new SurfaceVertexTangentVectorQuantity(name, vectors, basisX, basisY, *this, nSym, vectorType);
   addQuantity(q);
   return q;
 }
@@ -1548,62 +1630,11 @@ SurfaceMesh::addVertexTangentVectorQuantityImpl(std::string name, const std::vec
 SurfaceOneFormTangentVectorQuantity*
 SurfaceMesh::addOneFormTangentVectorQuantityImpl(std::string name, const std::vector<double>& data,
                                                  const std::vector<char>& orientations) {
-  SurfaceOneFormTangentVectorQuantity* q = new SurfaceOneFormTangentVectorQuantity(
-      name, applyPermutation(data, edgePerm), applyPermutation(orientations, edgePerm), *this);
+  SurfaceOneFormTangentVectorQuantity* q = new SurfaceOneFormTangentVectorQuantity(name, data, orientations, *this);
   addQuantity(q);
   markEdgesAsUsed();
   return q;
 }
-
-
-void SurfaceMesh::setVertexTangentBasisXImpl(const std::vector<glm::vec3>& inputBasisX) {
-
-  vertexNormals.ensureHostBufferPopulated();
-
-  vertexTangentSpaces.data.resize(nVertices());
-
-  for (size_t iV = 0; iV < nVertices(); iV++) {
-
-    glm::vec3 basisX = inputBasisX[iV];
-    glm::vec3 normal = vertexNormals.data[iV];
-
-    // Project in to tangent defined by our normals
-    basisX = glm::normalize(basisX - normal * glm::dot(normal, basisX));
-
-    // Let basis Y complete the frame
-    glm::vec3 basisY = glm::cross(normal, basisX);
-
-    vertexTangentSpaces.data[iV][0] = basisX;
-    vertexTangentSpaces.data[iV][1] = basisY;
-  }
-
-  vertexTangentSpaces.markHostBufferUpdated();
-}
-
-void SurfaceMesh::setFaceTangentBasisXImpl(const std::vector<glm::vec3>& inputBasisX) {
-
-  faceNormals.ensureHostBufferPopulated();
-
-  faceTangentSpaces.data.resize(nFaces());
-
-  for (size_t iF = 0; iF < nFaces(); iF++) {
-
-    glm::vec3 basisX = inputBasisX[iF];
-    glm::vec3 normal = faceNormals.data[iF];
-
-    // Project in to tangent defined by our normals
-    basisX = glm::normalize(basisX - normal * glm::dot(normal, basisX));
-
-    // Let basis Y complete the frame
-    glm::vec3 basisY = glm::cross(normal, basisX);
-
-    faceTangentSpaces.data[iF][0] = basisX;
-    faceTangentSpaces.data[iF][1] = basisY;
-  }
-
-  faceTangentSpaces.markHostBufferUpdated();
-}
-
 
 SurfaceMeshQuantity::SurfaceMeshQuantity(std::string name, SurfaceMesh& parentStructure, bool dominates)
     : QuantityS<SurfaceMesh>(name, parentStructure, dominates) {}
